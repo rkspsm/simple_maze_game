@@ -12,13 +12,6 @@ Inductive location :=
 | loc_door
 .
 
-Inductive movement :=
-| mv_up
-| mv_left
-| mv_right
-| mv_down
-.
-
 Definition loc_row := list location.
 Definition loc_map := list loc_row.
 
@@ -53,20 +46,56 @@ Definition loc_map_valid (lm : loc_map) : Prop :=
   (1 <= loc_map_count lm loc_door).
 
 Inductive major_ui :=
-| game
-| postgame
-| menu
-| designer
+| ui_game
+| ui_postgame
+| ui_menu
+| ui_designer
 .
 
 Inductive app_state :=
-| app_launched
-| app_running : major_ui -> app_state.
+| appst_launched
+| appst_running : major_ui -> app_state.
+
+Parameter map_index : Set.
 
 Definition is_visible := bool.
 Definition is_victorious := bool.
+
+Inductive timer_control :=
+| tc_activate
+| tc_deactivate
+| tc_pause
+| tc_play
+.
+
+Definition coords := (prod nat nat).
+
+Inductive movement :=
+| mv_up
+| mv_left
+| mv_right
+| mv_down
+.
     
 Inductive command :=
+| cmd_set_state : app_state -> command
 | cmd_set_visibility : major_ui -> is_visible -> command
 | cmd_set_postgame : is_victorious -> command
+| cmd_game_timer_activate : timer_control -> command
+| cmd_game_pause : bool -> command
+| cmd_select_map : map_index -> command
 .
+
+Inductive stimulus :=
+| stls_launched
+| stls_game_moved : movement -> stimulus
+| stls_menu_map_selected : map_index -> stimulus
+| stls_postgame_goto_menu
+| stls_postgame_play_again
+| stls_menu_designer
+| stls_game_tick
+| stls_game_pause : bool -> stimulus
+| stls_game_quit
+.
+
+Inductive process : app_state -> stimulus -> list command -> Prop :=.
