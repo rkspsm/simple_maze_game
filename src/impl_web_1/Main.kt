@@ -200,6 +200,19 @@ class replay_context constructor (
       else -> arrayOf ()
     }
   }
+
+  fun relproc_replay (cmd : command) : Array<replay_command> {
+    return when (cmd) {
+      is cmd_game_init_replay -> arrayOf (rcmd_init (gt))
+      is cmd_game_finish_replay -> cmd.is_vict?.let {
+        when (cmd.is_vict) {
+          true -> arrayOf<replay_command> (rcmd_finish (gt, is_victorious_true))
+          false -> arrayOf<replay_command> (rcmd_finish (gt, is_victorious_false))
+        }
+      } ?: arrayOf<replay_command> (rcmd_abort (gt))
+      else -> arrayOf ()
+    }
+  }
 }
 
 typealias level_index = Int ;
@@ -212,6 +225,150 @@ data class stls_menu_level_selected (val li : level_index) : stimulus () ;
 object stls_menu_designer : stimulus () ;
 object stls_menu_replay : stimulus () ;
 object stls_menu_game_info : stimulus () ;
+
+data class stls_game_moved (val m : movement) : stimulus () ;
+object stls_game_tick : stimulus () ;
+data class stls_game_pause (val pause : Boolean) : stimulus () ;
+object stls_game_quit : stimulus () ;
+object stls_game_victory : stimulus () ;
+object stls_game_fuel_empty : stimulus () ;
+
+object stls_postgame_goto_menu : stimulus () ;
+object stls_postgame_play_again : stimulus () ;
+object stls_postgame_download_replay : stimulus () ;
+
+sealed class command ;
+
+data class cmd_set_state (val state : app_state) : command () ;
+data class cmd_select_ui (val ui : major_ui) : command () ;
+
+object cmd_menu_fetch_builtin_levels : command () ;
+object cmd_menu_populate : command () ;
+data class cmd_menu_select_level (val li : level_index) : command () ;
+
+data class cmd_game_timer (val tc : timer_control) : command () ;
+data class cmd_game_pause (val pause : Boolean) : command () ;
+object cmd_game_fuel_tick : command () ;
+data class cmd_game_process_move (val m : movement) : command () ;
+object cmd_game_init_replay : command () ;
+data class cmd_game_finish_replay (val is_vict : is_victorious?) : command () ;
+
+object cmd_postgame_reset_map : command () ;
+data class cmd_postgame_set_theme (val is_vict : is_victorious) : command () ;
+object cmd_postgame_prepare_replay : command () ;
+object cmd_postgame_offer_replay_download : command () ;
+
+fun process (ast : app_state, stim : stimulus) : Array<command> {
+
+  return when (ast) {
+
+    is appst_launched -> when (stim) {
+      is stls_launched -> arrayOf (
+        cmd_set_state (appst_menu) ,
+        cmd_menu_fetch_builtin_levels ,
+        cmd_menu_populate )
+      else -> arrayOf ()
+    }
+
+    is appst_menu -> when (stim) {
+      is stls_menu_level_selected -> arrayOf (
+        cmd_menu_select_level (stim.li) ,
+        cmd_game_timer (tc_reset) ,
+        cmd_game_timer (tc_run) ,
+        cmd_set_state (appst_game (false)) ,
+        cmd_game_init_replay
+      )
+
+      else -> arrayOf ()
+    }
+
+    is appst_game -> when (ast.paused) {
+      false -> when (stim) {
+        is stls_game_tick -> arrayOf<command> (cmd_game_fuel_tick)
+        is stls_game_pause -> when (stim.pause) {
+          true -> arrayOf (
+            cmd_game_timer (tc_pause) ,
+            cmd_set_state (appst_game (is_paused_true)))
+          false -> arrayOf ()
+        }
+        is stls_game_moved -> arrayOf<command> (
+          cmd_game_process_move (stim.m))
+        is stls_game_victory -> arrayOf (
+          cmd_set_state (appst_postgame (is_victorious_true)) ,
+          cmd_game_finish_replay (is_victorious_true) ,
+          cmd_game_timer (tc_stop) ,
+          cmd_postgame_set_theme (is_victorious_true) ,
+          cmd_select_ui (ui_postgame) ,
+          cmd_postgame_prepare_replay
+        )
+        is stls_game_fuel_empty -> arrayOf (
+          cmd_set_state (appst_postgame (is_victorious_false)) ,
+          cmd_game_finish_replay (is_victorious_false) ,
+          cmd_game_timer (tc_stop) ,
+          cmd_postgame_set_theme (is_victorious_false) ,
+          cmd_select_ui (ui_postgame) ,
+          cmd_postgame_prepare_replay
+        )
+        is stls_game_quit -> arrayOf (
+          cmd_set_state (appst_postgame (is_victorious_false)) ,
+          cmd_game_finish_replay (null) ,
+          cmd_game_timer (tc_stop) ,
+          cmd_postgame_set_theme (is_victorious_false) ,
+          cmd_select_ui (ui_postgame) ,
+          cmd_postgame_prepare_replay
+        )
+        else -> arrayOf ()
+      }
+      true -> when (stim) {
+        is stls_game_pause -> when (stim.pause) {
+          false -> arrayOf (
+            cmd_game_timer (tc_run) ,
+            cmd_set_state (appst_game (is_paused_false)))
+          true -> arrayOf ()
+        }
+        else -> arrayOf ()
+      }
+    }
+
+    is appst_postgame -> when (stim) {
+      is stls_postgame_goto_menu -> arrayOf (
+        cmd_set_state (appst_menu) ,
+        cmd_select_ui (ui_menu) )
+      is stls_postgame_play_again -> arrayOf (
+        cmd_postgame_reset_map ,
+        cmd_set_state (appst_game (is_paused_false)) ,
+        cmd_game_timer (tc_reset) ,
+        cmd_game_timer (tc_run) ,
+        cmd_select_ui (ui_game) ,
+        cmd_game_init_replay
+      )
+      is stls_postgame_download_replay -> arrayOf<command> (
+        cmd_postgame_offer_replay_download )
+      else -> arrayOf<command> ()
+    }
+
+    else -> arrayOf ()
+  }
+}
+
+data class level (
+  val board : loc_map ,
+  val tick_interval : game_time ,
+  val max_fuel : game_fuel ,
+  val starting_fuel : game_fuel ,
+  val _key_fuel : HashMap<coords,game_fuel> ,
+  val _door_keys : HashMap<coords,Int> ,
+  val tick_cost : game_fuel ,
+  val move_cost : game_fuel )
+{
+
+  fun key_fuel (c : coords) : game_fuel =
+    _key_fuel[c] ?: game_fuel (0)
+
+  fun door_keys (c : coords) : Int =
+    _door_keys[c] ?: 1
+
+}
 
 fun main (s : Array<String>) {
 }

@@ -189,11 +189,11 @@ Inductive stimulus :=
 Inductive command :=
 | cmd_set_state : app_state -> command
 | cmd_select_ui : major_ui -> command
-| cmd_set_postgame : is_victorious -> command
-| cmd_select_level : level_index -> command
-| cmd_reset_map
-| cmd_fetch_builtin_level_populate_menu
 
+| cmd_menu_fetch_builtin_levels
+| cmd_menu_populate
+| cmd_menu_select_level : level_index -> command
+    
 | cmd_game_timer : timer_control -> command
 | cmd_game_pause : bool -> command
 | cmd_game_fuel_tick
@@ -201,6 +201,8 @@ Inductive command :=
 | cmd_game_init_replay
 | cmd_game_finish_replay : option is_victorious -> command
 
+| cmd_postgame_reset_map
+| cmd_postgame_set_theme : is_victorious -> command
 | cmd_postgame_prepare_replay
 | cmd_postgame_offer_replay_download
 .
@@ -211,12 +213,13 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
     process appst_launched stls_launched
             [ cmd_set_state appst_menu ;
                 cmd_select_ui ui_menu ;
-                cmd_fetch_builtin_level_populate_menu
+                cmd_menu_fetch_builtin_levels ;
+                cmd_menu_populate
             ]
 
 | proc_menu_map_selected : forall li,
     process appst_menu (stls_menu_level_selected li)
-            [ cmd_select_level li ;
+            [ cmd_menu_select_level li ;
                 cmd_select_ui ui_game ;
                 cmd_game_timer tc_reset ;
                 cmd_game_timer tc_run ;
@@ -249,7 +252,7 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
             [ cmd_set_state (appst_postgame is_victorious_true) ;
                 cmd_game_finish_replay (Some is_victorious_true) ;
                 cmd_game_timer tc_stop ;
-                cmd_set_postgame is_victorious_true ;
+                cmd_postgame_set_theme is_victorious_true ;
                 cmd_select_ui ui_postgame ;
                 cmd_postgame_prepare_replay
             ]
@@ -259,17 +262,17 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
             [ cmd_set_state (appst_postgame is_victorious_false) ;
                 cmd_game_finish_replay (Some is_victorious_false) ;
                 cmd_game_timer tc_stop ;
-                cmd_set_postgame is_victorious_false ;
+                cmd_postgame_set_theme is_victorious_false ;
                 cmd_select_ui ui_postgame ;
                 cmd_postgame_prepare_replay
             ]
 
 | proc_game_quit :
-    process (appst_game is_paused_false) stls_game_fuel_empty
+    process (appst_game is_paused_false) stls_game_quit
             [ cmd_set_state (appst_postgame is_victorious_false) ;
                 cmd_game_finish_replay None ;
                 cmd_game_timer tc_stop ;
-                cmd_set_postgame is_victorious_false ;
+                cmd_postgame_set_theme is_victorious_false ;
                 cmd_select_ui ui_postgame ;
                 cmd_postgame_prepare_replay
             ]
@@ -282,7 +285,7 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
 
 | proc_postgame_play_again : forall is_vict,
     process (appst_postgame is_vict) stls_postgame_play_again
-            [ cmd_reset_map ;
+            [ cmd_postgame_reset_map ;
                 cmd_set_state (appst_game is_paused_false) ;
                 cmd_game_timer tc_reset ;
                 cmd_game_timer tc_run ;
