@@ -20,7 +20,7 @@ data class loc_door (val opened : is_opened) : location () ;
 
 typealias loc_map = MutableList<MutableList<location>> ;
 
-fun clone_loc_map (l : loc_map) : loc_map {
+fun copy_loc_map (l : loc_map) : loc_map {
   val result : loc_map = mutableListOf () ;
   for (lr in l) {
     val row : MutableList<location> = mutableListOf () ;
@@ -106,37 +106,8 @@ typealias start_time = Double ;
 
 data class game_fuel (var remaining : Int) ;
 
-sealed class replay_control ;
-data class rep_init (val gt : game_time) : replay_control () ;
-data class rep_append (
-  val st : start_time,
-  val gt : game_time,
-  val fuel : game_fuel,
-  val lm : loc_map) : replay_control () ;
-data class rep_finish (
-  val st : start_time,
-  val gt : game_time,
-  val is_vict : is_victorious) : replay_control () ;
-data class rep_abort (val st : start_time, val gt : game_time) : replay_control () ;
-
-sealed class replay_command ;
-data class rcmd_set_start_time (val gt : game_time) : replay_command () ;
-data class rcmd_add_map
-  (val gt : game_time, val fuel : game_fuel, val lm : loc_map) : replay_command () ;
-data class rcmd_set_abort (val gt : game_time) : replay_command () ;
-data class rcmd_set_victory (val gt : game_time) : replay_command () ;
-data class rcmd_set_loss (val gt : game_time) : replay_command () ;
-
-fun replay_process (rc : replay_control) : Array<replay_command> {
-  return when (rc) {
-    is rep_init -> arrayOf (rcmd_set_start_time (rc.gt))
-    is rep_append -> arrayOf (rcmd_add_map ((rc.gt - rc.st), rc.fuel, rc.lm))
-    is rep_finish -> when (rc.is_vict) {
-      false -> arrayOf<replay_command> (rcmd_set_loss (rc.gt - rc.st))
-      true -> arrayOf<replay_command> (rcmd_set_loss (rc.gt - rc.st)) }
-    is rep_abort -> arrayOf (rcmd_set_abort (rc.gt - rc.st))
-  }
-}
+typealias location_update = Pair<coords, location> ;
+typealias location_updates = Array<location_update> ;
 
 sealed class move_command ;
 data class mvcmd_update_coords (val c : coords, val l : location) : move_command () ;
@@ -144,7 +115,7 @@ object mvcmd_key_update_doors : move_command () ;
 object mvcmd_trigger_victory : move_command () ;
 object mvcmd_expend_fuel : move_command () ;
 data class mvcmd_update_player_coords (val c : coords) : move_command () ;
-object mvcmd_append_to_replay : move_command () ;
+data class mvcmd_append_to_replay (val lups : location_updates) : move_command () ;
 data class mvcmd_add_fuel (val c : coords) : move_command () ;
 
 class process_move constructor
@@ -172,21 +143,27 @@ class process_move constructor
           mvcmd_update_coords (_dest, loc_player),
           mvcmd_update_player_coords (_dest),
           mvcmd_expend_fuel,
-          mvcmd_append_to_replay )
+          mvcmd_append_to_replay (arrayOf (
+            Pair (src, loc_empty), Pair (_dest, loc_player)))
+        )
         is loc_key -> arrayOf (
           mvcmd_update_coords (src, loc_empty),
           mvcmd_update_coords (_dest, loc_player),
           mvcmd_update_player_coords (_dest),
           mvcmd_add_fuel (_dest),
-          mvcmd_append_to_replay )
+          mvcmd_append_to_replay (arrayOf (
+            Pair (src, loc_empty), Pair (_dest, loc_player)))
+        )
         is loc_door -> when (loc.opened) {
           false -> arrayOf ()
           true -> arrayOf (
             mvcmd_update_coords (src, loc_empty),
             mvcmd_update_coords (_dest, loc_player),
             mvcmd_update_player_coords (_dest),
-            mvcmd_append_to_replay,
-            mvcmd_trigger_victory )
+            mvcmd_append_to_replay (arrayOf (
+              Pair (src, loc_empty), Pair (_dest, loc_player))) ,
+            mvcmd_trigger_victory
+          )
         }
         else -> arrayOf ()
       }
@@ -197,22 +174,44 @@ class process_move constructor
 
 }
 
+sealed class replay_command ;
+data class rcmd_init (val gt : game_time) : replay_command () ;
+data class rcmd_loc_update 
+  (val gt : game_time, val lups : location_updates) : replay_command () ;
+data class rcmd_fuel_update
+  (val gt : game_time, val fuel : game_fuel) : replay_command () ;
+data class rcmd_finish
+  (val gt : game_time, val is_vict : is_victorious) : replay_command () ;
+data class rcmd_abort (val gt : game_time) : replay_command () ;
+
 class replay_context constructor (
-  val lm : loc_map,
   val fuel : game_fuel,
   val st : start_time)
 {
   val gt : game_time
     get () = current_time () ;
 
-  fun relproc_move_replay (cmd : move_command) : Array<replay_control> {
+  fun relproc_move_replay (cmd : move_command) : Array<replay_command> {
     return when (cmd) {
       is mvcmd_append_to_replay -> arrayOf (
-        rep_append (st, gt, fuel.copy (), clone_loc_map (lm)))
+        rcmd_fuel_update (gt, fuel.copy ()) ,
+        rcmd_loc_update (gt, cmd.lups)
+      )
       else -> arrayOf ()
     }
   }
 }
+
+typealias level_index = Int ;
+
+sealed class stimulus ;
+
+object stls_launched : stimulus () ;
+
+data class stls_menu_level_selected (val li : level_index) : stimulus () ;
+object stls_menu_designer : stimulus () ;
+object stls_menu_replay : stimulus () ;
+object stls_menu_game_info : stimulus () ;
 
 fun main (s : Array<String>) {
 }

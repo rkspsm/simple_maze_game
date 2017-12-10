@@ -15,6 +15,10 @@ Definition copy_extract {A:Set} (x: @Mutable A) : A :=
   | mutable x' => x'
   end.
 
+Arguments mutable {A} _.
+
+Parameter Immutable : Set -> Prop.
+
 Definition is_opened := bool.
 Definition is_opened_true := true.
 Definition is_opened_false := false.
@@ -28,6 +32,7 @@ Inductive location :=
 .
 
 Definition loc_map := list (list location).
+Parameter copy_loc_map : Immutable loc_map -> Mutable loc_map.
 
 Parameter loc_map_count : loc_map -> location -> nat.
 
@@ -137,22 +142,22 @@ Inductive process_move : loc_map -> coords -> movement -> list move_command -> P
                  ]
 .
 
-Parameter replay_context :
-  (Mutable loc_map) -> (Mutable game_fuel) -> game_time -> Prop.
-
 Inductive replay_command :=
-| rcmd_init : game_time -> loc_map -> replay_command
+| rcmd_init : game_time -> replay_command
 | rcmd_loc_update : game_time -> location_updates -> replay_command
 | rcmd_fuel_update : game_time -> game_fuel -> replay_command
 | rcmd_finish : game_time -> is_victorious -> replay_command
 | rcmd_abort : game_time -> replay_command
 .
 
+Parameter replay_context :
+  (Mutable game_fuel) -> game_time -> Prop.
+
 Inductive relproc_move_replay :
   move_command -> list replay_command -> Prop :=
 
-| rmr_append_to_replay : forall lm fuel gt lups,
-    replay_context lm fuel gt ->
+| rmr_append_to_replay : forall fuel gt lups,
+    replay_context fuel gt ->
     relproc_move_replay (mvcmd_append_to_replay lups)
                         [ rcmd_fuel_update gt (copy_extract fuel) ;
                             rcmd_loc_update gt lups
@@ -196,6 +201,7 @@ Inductive command :=
 | cmd_game_init_replay
 | cmd_game_finish_replay : option is_victorious -> command
 
+| cmd_postgame_prepare_replay
 | cmd_postgame_offer_replay_download
 .
 
@@ -244,7 +250,8 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
                 cmd_game_finish_replay (Some is_victorious_true) ;
                 cmd_game_timer tc_stop ;
                 cmd_set_postgame is_victorious_true ;
-                cmd_select_ui ui_postgame
+                cmd_select_ui ui_postgame ;
+                cmd_postgame_prepare_replay
             ]
 
 | proc_fuel_empty :
@@ -253,7 +260,8 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
                 cmd_game_finish_replay (Some is_victorious_false) ;
                 cmd_game_timer tc_stop ;
                 cmd_set_postgame is_victorious_false ;
-                cmd_select_ui ui_postgame
+                cmd_select_ui ui_postgame ;
+                cmd_postgame_prepare_replay
             ]
 
 | proc_game_quit :
@@ -262,7 +270,8 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
                 cmd_game_finish_replay None ;
                 cmd_game_timer tc_stop ;
                 cmd_set_postgame is_victorious_false ;
-                cmd_select_ui ui_postgame
+                cmd_select_ui ui_postgame ;
+                cmd_postgame_prepare_replay
             ]
 
 | proc_postgame_goto_menu : forall is_vict,
@@ -289,30 +298,30 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
 
 Inductive relproc_replay : command -> list replay_command -> Prop :=
 
-| rr_init_replay : forall board fuel gt,
-    replay_context board fuel gt ->
+| rr_init_replay : forall fuel gt,
+    replay_context fuel gt ->
     relproc_replay cmd_game_init_replay
-                   [ rcmd_init gt (copy_extract board)]
+                   [ rcmd_init gt ]
 
-| rr_win : forall gt board fuel,
-    replay_context board fuel gt ->
+| rr_win : forall gt fuel,
+    replay_context fuel gt ->
     relproc_replay (cmd_game_finish_replay (Some is_victorious_true))
                    [ rcmd_finish gt is_victorious_true ]
 
-| rr_loss : forall gt board fuel,
-    replay_context board fuel gt ->
+| rr_loss : forall gt fuel,
+    replay_context fuel gt ->
     relproc_replay (cmd_game_finish_replay (Some is_victorious_false))
                    [ rcmd_finish gt is_victorious_false ]
 
-| rr_abort : forall gt board fuel,
-    replay_context board fuel gt ->
+| rr_abort : forall gt fuel,
+    replay_context fuel gt ->
     relproc_replay (cmd_game_finish_replay None)
                    [ rcmd_abort gt ]
 .
 
 Inductive level : Set :=
 | new_level : forall
-    (board : loc_map)
+    (board : Immutable loc_map)
     (tick_interval : game_time)
     (max_fuel : game_fuel)
     (starting_fuel : game_fuel)
