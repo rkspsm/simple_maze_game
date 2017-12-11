@@ -189,6 +189,7 @@ Inductive stimulus :=
 Inductive command :=
 | cmd_set_state : app_state -> command
 | cmd_select_ui : major_ui -> command
+| cmd_setup_ui
 
 | cmd_menu_fetch_builtin_levels
 | cmd_menu_populate
@@ -211,7 +212,8 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
 
 | proc_launched :
     process appst_launched stls_launched
-            [ cmd_set_state appst_menu ;
+            [ cmd_setup_ui ;
+                cmd_set_state appst_menu ;
                 cmd_select_ui ui_menu ;
                 cmd_menu_fetch_builtin_levels ;
                 cmd_menu_populate

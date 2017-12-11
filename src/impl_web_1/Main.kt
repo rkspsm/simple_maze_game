@@ -5,7 +5,27 @@ import kotlin.browser.* ;
 import kotlin.collections.MutableSet ;
 import kotlin.collections.MutableList ;
 
+// ------------- Module Helpers. -------------------
+
 fun current_time () : Double { return Date ().getTime () ; }
+fun sched (ms : Int, fn : () -> Unit) = window.setTimeout (fn, ms) ;
+
+external class jQuery constructor (stuff : String = definedExternally) {
+
+  fun append (x : jQuery) : jQuery ;
+  fun appendTo (x : jQuery) : jQuery ;
+
+  fun prepend (x : jQuery) : jQuery ;
+  fun prependTo (x : jQuery) : jQuery ;
+
+  fun text (x : String) : jQuery ;
+}
+
+fun empty_div () : jQuery = jQuery ("<div></div>") ;
+
+// ------------------ End Helpers. ------------------
+
+// ------------------ Module Spec. ------------------
 
 typealias is_opened = Boolean ;
 val is_opened_true = true ;
@@ -241,6 +261,7 @@ sealed class command ;
 
 data class cmd_set_state (val state : app_state) : command () ;
 data class cmd_select_ui (val ui : major_ui) : command () ;
+object cmd_setup_ui : command () ;
 
 object cmd_menu_fetch_builtin_levels : command () ;
 object cmd_menu_populate : command () ;
@@ -264,6 +285,7 @@ fun process (ast : app_state, stim : stimulus) : Array<command> {
 
     is appst_launched -> when (stim) {
       is stls_launched -> arrayOf (
+        cmd_setup_ui ,
         cmd_set_state (appst_menu) ,
         cmd_menu_fetch_builtin_levels ,
         cmd_menu_populate )
@@ -370,6 +392,45 @@ data class level (
 
 }
 
+// ------------------ End Spec. ------------------
+
+class Executor {
+
+  var m_app_state = appst_launched ;
+
+  fun run () : Unit {
+    send (stls_launched) ;
+  }
+
+  fun send (stim : stimulus) {
+    val cmds = process (m_app_state, stim) ;
+    sched (0, {
+      for (cmd in cmds) {
+        run_command (cmd) ;
+      }
+    }) ;
+  }
+
+  fun run_command (cmd : command) : Unit {
+    when (cmd) {
+      is cmd_setup_ui -> setup_ui ()
+      else -> { }
+    }
+  }
+
+  val m_ui_game = empty_div () ;
+  val m_ui_postgame = empty_div () ;
+  val m_ui_menu = empty_div () ;
+  val m_ui_designer = empty_div () ;
+  val m_ui_replay = empty_div () ;
+
+  fun setup_ui () : Unit {
+  }
+}
+
+val executor = Executor () ;
+
 fun main (s : Array<String>) {
+  executor.run () ;
 }
 
