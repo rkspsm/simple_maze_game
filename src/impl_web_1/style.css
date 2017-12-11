@@ -1,3 +1,8 @@
-body {
-  background-color: hsl(0, 50, 50) ;
+.menu-title {
+  font-weight : bold ;
 }
+
+.game-main {
+  font-family : monospace ;
+}
+

@@ -168,7 +168,8 @@ Parameter level_index : Set.
 
 Inductive stimulus :=
 | stls_launched
-    
+
+| stls_menu_levels_fetched
 | stls_menu_level_selected : level_index -> stimulus
 | stls_menu_designer
 | stls_menu_replay
@@ -215,9 +216,12 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
             [ cmd_setup_ui ;
                 cmd_set_state appst_menu ;
                 cmd_select_ui ui_menu ;
-                cmd_menu_fetch_builtin_levels ;
-                cmd_menu_populate
+                cmd_menu_fetch_builtin_levels
             ]
+
+| proc_levels_fetched :
+    process appst_menu stls_menu_levels_fetched
+            [ cmd_menu_populate ]
 
 | proc_menu_map_selected : forall li,
     process appst_menu (stls_menu_level_selected li)
@@ -324,6 +328,8 @@ Inductive relproc_replay : command -> list replay_command -> Prop :=
                    [ rcmd_abort gt ]
 .
 
+Parameter label_string : Set.
+
 Inductive level : Set :=
 | new_level : forall
     (board : Immutable loc_map)
@@ -333,6 +339,7 @@ Inductive level : Set :=
     (key_fuel : coords -> game_fuel)
     (door_keys : coords -> nat)
     (tick_cost : game_fuel)
-    (move_cost : game_fuel),
+    (move_cost : game_fuel)
+    (name : label_string),
 
     level.
