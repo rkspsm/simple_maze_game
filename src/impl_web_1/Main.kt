@@ -39,6 +39,8 @@ external interface jquery {
   @JsName ("click")
   fun on_click (fn : (evt: event) -> Unit) : jquery ;
 
+  fun eq (x : Int) : jquery ;
+
   fun hide () : jquery ;
 
   @JsName ("keydown")

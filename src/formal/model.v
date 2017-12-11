@@ -343,3 +343,198 @@ Inductive level : Set :=
     (name : label_string),
 
     level.
+
+Inductive designer_mode :=
+| dsm_painting
+| dsm_configuring
+.
+
+Parameter existing_level : Set.
+
+Inductive designer_stimulus :=
+  
+| ds_started
+| ds_new
+| ds_existing : existing_level -> designer_stimulus
+| ds_existing_verified : bool -> designer_stimulus
+| ds_map_size_specified : nat -> nat -> designer_stimulus
+| ds_quit
+| ds_canvas_mouse_down : coords -> designer_stimulus
+| ds_canvas_mouse_in : coords -> designer_stimulus
+| ds_canvas_mouse_up : designer_stimulus
+| ds_brush_click : location -> designer_stimulus
+| ds_mode_picked : designer_mode -> designer_stimulus
+| ds_done
+| ds_editing_verified : bool -> designer_stimulus
+| ds_download
+| ds_add_to_menu
+.
+
+Inductive designer_command :=
+
+| dcmd_show_new_or_existing
+| dcmd_verify_dropped_file : existing_level -> designer_command
+| dcmd_load_dropped_file
+| dcmd_discard_dropped_file
+| dcmd_show_size_picker
+| dcmd_load_new_file : nat -> nat -> designer_command
+| dcmd_back_to_menu
+| dcmd_activate_painting : bool -> designer_command
+| dcmd_paint_at_coord : coords -> location -> designer_command
+| dcmd_pick_brush : location -> designer_command
+| dcmd_enable_brush_picker : bool -> designer_command
+| dcmd_hide_config
+| dcmd_showadd_key_config : coords -> designer_command
+| dcmd_showadd_door_config : coords -> designer_command
+| dcmd_showadd_map_config : coords -> designer_command
+| dcmd_verify_editing
+| dcmd_show_map_invalid
+| dcmd_show_done_screen
+| dcmd_prepare_file
+| dcmd_offer_download
+| dcmd_add_to_menu
+.
+
+Inductive designer_state : Prop :=
+| dstate_just_started
+| dstate_file_picking
+| dstate_size_picking
+| dstate_drop_verifying
+| dstate_painting
+| dstate_configuring
+| dstate_edit_verifying
+| dstate_finalizing
+| dstate_exiting
+.
+
+Parameter designer_painting_activated : Prop.
+Parameter designer_current_brush : location -> Prop.
+Parameter designer_board_tile : coords -> location -> Prop.
+
+Inductive designer_process :
+  designer_stimulus -> designer_state -> designer_state -> list designer_command -> Prop :=
+
+| dproc_started :
+    designer_process ds_started
+                     dstate_just_started dstate_file_picking
+                     [ dcmd_show_new_or_existing ]
+
+| dproc_new_option :
+    designer_process ds_new
+                     dstate_file_picking dstate_size_picking
+                     [ dcmd_show_size_picker ]
+
+| dproc_new_painting : forall r c,
+    designer_process (ds_map_size_specified r c)
+                     dstate_size_picking dstate_painting
+                     [ dcmd_load_new_file r c ;
+                         dcmd_pick_brush loc_empty ;
+                         dcmd_hide_config ]
+
+| dproc_existing_dropped : forall fl,
+    designer_process (ds_existing fl)
+                     dstate_file_picking dstate_drop_verifying
+                     [ dcmd_verify_dropped_file fl ]
+
+| dproc_existing_verified :
+    designer_process (ds_existing_verified true)
+                     dstate_drop_verifying dstate_painting
+                     [ dcmd_load_dropped_file ;
+                         dcmd_pick_brush loc_empty ;
+                         dcmd_hide_config ]
+
+| dproc_existing_failed_verification :
+    designer_process (ds_existing_verified false)
+                     dstate_drop_verifying dstate_file_picking
+                     [ dcmd_show_map_invalid ;
+                         dcmd_discard_dropped_file ]
+
+| dproc_mouse_down_canvas : forall c l,
+    designer_current_brush l ->
+    designer_process (ds_canvas_mouse_down c)
+                     dstate_painting dstate_painting
+                     [ dcmd_activate_painting true ;
+                         dcmd_paint_at_coord c l ]
+
+| dproc_mouse_in_canvas : forall c l,
+    designer_current_brush l ->
+    designer_painting_activated ->
+    designer_process (ds_canvas_mouse_in c)
+                     dstate_painting dstate_painting
+                     [ dcmd_paint_at_coord c l ]
+
+| dproc_mouse_up_canvas :
+    designer_painting_activated ->
+    designer_process ds_canvas_mouse_up
+                     dstate_painting dstate_painting
+                     [ dcmd_activate_painting false ]
+
+| dproc_brush_selected : forall l,
+    designer_process (ds_brush_click l)
+                     dstate_painting dstate_painting
+                     [ dcmd_pick_brush l ]
+
+| dproc_mode_to_configuring :
+    designer_process (ds_mode_picked dsm_configuring)
+                     dstate_painting dstate_configuring
+                     [ dcmd_enable_brush_picker false ;
+                         dcmd_hide_config ]
+
+| dproc_mode_to_painting :
+    designer_process (ds_mode_picked dsm_painting)
+                     dstate_configuring dstate_painting
+                     [ dcmd_hide_config ;
+                         dcmd_enable_brush_picker true ]
+
+| dproc_configuring_player : forall c,
+    designer_board_tile c loc_player ->
+    designer_process (ds_canvas_mouse_down c)
+                     dstate_configuring dstate_configuring
+                     [ dcmd_hide_config ;
+                         dcmd_showadd_map_config c ]
+
+| dproc_configuring_door : forall c f,
+    designer_board_tile c (loc_door f) ->
+    designer_process (ds_canvas_mouse_down c)
+                     dstate_configuring dstate_configuring
+                     [ dcmd_hide_config ;
+                         dcmd_showadd_door_config c ]
+
+| dproc_configuring_key : forall c,
+    designer_board_tile c loc_key ->
+    designer_process (ds_canvas_mouse_down c)
+                     dstate_configuring dstate_configuring
+                     [ dcmd_hide_config ;
+                         dcmd_showadd_key_config c ]
+
+| dproc_verifying_editing :
+    designer_process ds_done
+                     dstate_configuring dstate_edit_verifying
+                     [ dcmd_verify_editing ]
+
+| dproc_verifying_failed :
+    designer_process (ds_editing_verified false)
+                     dstate_edit_verifying dstate_configuring
+                     [ dcmd_hide_config ]
+
+| dproc_verifying_success :
+    designer_process (ds_editing_verified true)
+                     dstate_edit_verifying dstate_finalizing
+                     [ dcmd_prepare_file ;
+                         dcmd_show_done_screen ]
+
+| dproc_downloading :
+    designer_process ds_download
+                     dstate_finalizing dstate_finalizing
+                     [ dcmd_offer_download ]
+
+| dproc_adding_to_menu :
+    designer_process ds_add_to_menu
+                     dstate_finalizing dstate_finalizing
+                     [ dcmd_add_to_menu ]
+
+| dproc_back_to_menu : forall s,
+    designer_process ds_quit
+                     s dstate_exiting
+                     [ dcmd_back_to_menu ]
+.
