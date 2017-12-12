@@ -13,7 +13,10 @@ build index.html : copy ../src/impl_web_1/index.html
 
 build style.css : copy ../src/impl_web_1/style.css
 
+# build supp.js : copy ../src/impl_web_1/supp.js
+
 build clean : clean
 
+#default main.js index.html style.css supp.js
 default main.js index.html style.css
 

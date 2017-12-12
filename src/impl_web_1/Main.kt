@@ -6,7 +6,6 @@ import org.w3c.dom.Window ;
 import org.w3c.dom.Document ;
 import kotlin.collections.MutableSet ;
 import kotlin.collections.MutableList ;
-import kotlin.text.StringBuilder ;
 
 // ------------- Module Helpers. -------------------
 
@@ -131,6 +130,18 @@ fun loc_map_count (lm : loc_map, l : location) : Int {
   }
 
   return result ;
+}
+
+fun board_find (board : loc_map, l : location) : coords {
+  for ((row, lr) in board.withIndex ()) {
+    for ((col, l_) in lr.withIndex ()) {
+      if (l_ == l) {
+        return coords (row, col) ;
+      }
+    }
+  }
+
+  return coords (0, 0) ;
 }
 
 fun loc_map_valid (lm : loc_map) : Boolean {
@@ -474,7 +485,148 @@ sealed class designer_mode ;
 object dsm_painting : designer_mode () ;
 object dsm_configuring : designer_mode () ;
 
+enum class json_keys (val str : String) {
+  player_config ("player_config") ,
+  door_config ("door_config") ,
+  key_config ("key_config") ,
+  rows ("rows") ,
+  cols ("cols") ,
+  board ("board") ,
+  tick_interval ("tick_interval") ,
+  max_fuel ("max_fuel") ,
+  starting_fuel ("starting_fuel") ,
+  tick_cost ("tick_cost") ,
+  move_cost ("move_cost") ,
+  map_name ("name")
+}
+
+fun <T> Json.uget (key : json_keys) : T = this[key.str].unsafeCast<T> () ;
+fun <T> Json.uget (key : String) : T = this[key].unsafeCast<T> () ;
+
+fun coord_key (c : coords) : String = "${c.row}_${c.col}" ;
+fun coord_key (row : Int, col : Int) = "${row}_${col}" ;
+
+fun loc_to_string (l : location) : String {
+  return when (l) {
+    is loc_empty -> "e"
+    is loc_player -> "p"
+    is loc_wall -> "w"
+    is loc_key -> "k"
+    is loc_door -> when (l.opened) {
+      true -> "o"
+      false -> "c"
+    }
+  }
+}
+
+fun string_to_loc (s : String) : location {
+  return when (s) {
+    "e" -> loc_empty
+    "p" -> loc_player
+    "w" -> loc_wall
+    "k" -> loc_key
+    "o" -> loc_door (true)
+    "c" -> loc_door (false)
+    else -> loc_wall
+  }
+}
+
+fun json_to_map (rows : Int, cols : Int, raw_board : Json) : loc_map {
+  val board : loc_map = mutableListOf () ;
+  var ir = 0
+  while (ir < rows) {
+    val row = mutableListOf<location> () ;
+    var ic = 0
+    while (ic < cols) {
+      row.add (string_to_loc (
+        raw_board.uget<String> (coord_key (ir, ic))))
+      ic ++ ;
+    }
+    board.add (row) ;
+    ir ++ ;
+  }
+  return board ;
+}
+
+fun json_to_coord_hash (rows : Int, cols : Int, raw : Json ,
+  handler : (coords, Any?) -> Unit )
+{
+  var ir = 0 ;
+  while (ir < rows) {
+    var ic = 0 ;
+    while (ic < cols) {
+      handler (
+        coords (ir, ic),
+        raw[coord_key (ir, ic)]) ;
+    }
+  }
+}
+
+data class player_config_tile (
+  val tick_interval : Double ,
+  val max_fuel : Int ,
+  val starting_fuel : Int ,
+  val tick_cost : Int ,
+  val move_cost : Int ,
+  val name : String
+) ;
+
+fun json_to_player_config_tile (raw : Json) : player_config_tile {
+  val tick_interval = raw.uget<Double> (json_keys.tick_interval) ;
+  val max_fuel = raw.uget<Int> (json_keys.max_fuel) ;
+  val starting_fuel = raw.uget<Int> (json_keys.starting_fuel) ;
+  val tick_cost = raw.uget<Int> (json_keys.tick_cost) ;
+  val move_cost = raw.uget<Int> (json_keys.move_cost) ;
+  val name = raw.uget<String> (json_keys.map_name) ;
+
+  return player_config_tile (
+    tick_interval, max_fuel, starting_fuel, tick_cost, move_cost, name) ;
+}
+
+fun json_to_level (raw : Json) : level {
+  val player_config = raw.uget<Json> (json_keys.player_config) ;
+  var door_config = raw.uget<Json> (json_keys.door_config) ;
+  var key_config = raw.uget<Json> (json_keys.key_config) ;
+
+  val _key_fuel = hashMapOf<coords, game_fuel> () ;
+  val _door_keys = hashMapOf<coords, Int> () ;
+
+  val rows = raw.uget<Int> (json_keys.rows) ;
+  val cols = raw.uget<Int> (json_keys.cols) ;
+  val raw_board = raw.uget<Json> (json_keys.board) ;
+  val board = json_to_map (rows, cols, raw_board) ;
+
+  json_to_coord_hash (rows, cols, key_config, { c , v ->
+    _key_fuel.put (c, game_fuel (v.unsafeCast<Int> ())) ;
+  }) ;
+  json_to_coord_hash (rows, cols, door_config, { c, v ->
+    _door_keys.put (c, v.unsafeCast<Int> ()) ;
+  }) ;
+
+  if (loc_map_valid (board)) {
+    val src = board_find (board, loc_player) ;
+    val conf = player_config.uget<Json> (coord_key (src)) ;
+    val pct = json_to_player_config_tile (conf) ;
+
+    return level (board, pct.tick_interval,
+      game_fuel (pct.max_fuel), game_fuel (pct.starting_fuel) ,
+      _key_fuel, _door_keys,
+      game_fuel (pct.tick_cost), game_fuel (pct.move_cost), pct.name) ;
+  }
+
+  return demo_level ;
+}
+
 class existing_level constructor (val raw_data : String) {
+
+  fun verify () : level? {
+    val lvl = json_to_level (JSON.parse<Json> (raw_data)) ;
+    if (loc_map_valid (lvl.board)) {
+      return lvl ;
+    } else {
+      return null ;
+    }
+  }
 
 }
 
@@ -601,18 +753,6 @@ class UiMenu constructor (
   }
 }
 
-fun board_find (board : loc_map, l : location) : coords {
-  for ((row, lr) in board.withIndex ()) {
-    for ((col, l_) in lr.withIndex ()) {
-      if (l_ == l) {
-        return coords (row, col) ;
-      }
-    }
-  }
-
-  return coords (0, 0) ;
-}
-
 class UiGame constructor (
   @JsName ("container") val parent : jquery ,
   val send : (stimulus) -> Unit ,
@@ -674,12 +814,7 @@ class UiGame constructor (
   }
 
   fun set_fuel (curf : Int, mf : Int) {
-    val sb = StringBuilder () ;
-    sb.append ("Fuel : ")
-    sb.append (curf) ;
-    sb.append (" / ") ;
-    sb.append (mf) ;
-    fuel_area.text (sb.toString ()) ;
+    fuel_area.text ("Fuel : $curf / $mf") ;
   }
 
   fun decorate_cell (cell : jquery, l : location) {
@@ -929,6 +1064,34 @@ class UiDesigner constructor (
   fun show_finalizer () : Unit {
     root.children ().hide () ;
     finalizer.show () ;
+  }
+
+  fun run_command (cmd : designer_command) {
+    when (cmd) {
+      is dcmd_show_new_or_existing -> { }
+      is dcmd_verify_dropped_file -> { }
+      is dcmd_load_dropped_file -> { }
+      is dcmd_discard_dropped_file -> { }
+      is dcmd_show_size_picker -> { }
+      is dcmd_load_new_file -> { }
+      is dcmd_back_to_menu -> { }
+      is dcmd_activate_painting -> { }
+      is dcmd_paint_at_coord -> { }
+      is dcmd_pick_brush -> { }
+      is dcmd_enable_brush_picker -> { }
+      is dcmd_hide_config -> { }
+      is dcmd_show_selection -> { }
+      is dcmd_clear_selection -> { }
+      is dcmd_showadd_key_config -> { }
+      is dcmd_showadd_door_config -> { }
+      is dcmd_showadd_map_config -> { }
+      is dcmd_verify_editing -> { }
+      is dcmd_show_map_invalid -> { }
+      is dcmd_show_done_screen -> { }
+      is dcmd_prepare_file -> { }
+      is dcmd_offer_download -> { }
+      is dcmd_add_to_menu -> { }
+    }
   }
 }
 
