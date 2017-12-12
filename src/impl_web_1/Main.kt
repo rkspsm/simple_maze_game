@@ -15,9 +15,55 @@ fun current_time () : Double { return js ("Date.now ()") ; }
 fun sched (ms : Double, fn : () -> Unit) = window.setTimeout (fn, ms.toInt ()) ;
 fun sched (ms : Int, fn : () -> Unit) = window.setTimeout (fn, ms) ;
 
+external interface file_interface {
+  @JsName ("type")
+  val mime_type : String ;
+
+  val size : Double ;
+}
+
+@JsName ("FileReader")
+external class file_reader {
+
+  @JsName ("addEventListener")
+  fun add_event_listener (e : String, fn : () -> Unit) : Unit ;
+
+  @JsName ("readAsText")
+  fun read_as_text (x : file_interface) : Unit ;
+
+  @JsName ("result")
+  val string_result : String ;
+}
+
+fun file_reader.read_text_file (f : file_interface, fn : (String) -> Unit) : Unit {
+  this.add_event_listener ("loadend", { fn (this.string_result) }) ;
+  this.read_as_text (f) ;
+}
+
+fun file_interface.is_json () : Boolean =
+  this.mime_type == "application/json" ;
+
+external interface file_list {
+  val length : Int ;
+
+  fun item (x : Int) : file_interface
+}
+
+external interface data_transfer {
+  val files : file_list ;
+}
+
+external interface original_event {
+  @JsName ("dataTransfer")
+  val data_transfer : data_transfer ;
+}
+
 external interface jquery {
 
   interface event {
+    @JsName ("originalEvent")
+    val original_event : original_event ;
+
     @JsName ("preventDefault")
     fun prevent_default () : Unit ;
 
@@ -37,10 +83,20 @@ external interface jquery {
   fun children (x : String = definedExternally) : jquery ;
   @JsName ("click")
   fun on_click (fn : (evt: event) -> Unit) : jquery ;
+  fun css (k : String, v : String) : jquery ;
 
   fun eq (x : Int) : jquery ;
 
   fun hide () : jquery ;
+
+  @JsName ("innerHeight")
+  fun inner_height (x : Double) : jquery ;
+  @JsName ("innerHeight")
+  fun inner_height () : Double ;
+  @JsName ("innerWidth")
+  fun inner_width (x : Double) : jquery ;
+  @JsName ("innerWidth")
+  fun inner_width () : Double ;
 
   @JsName ("keydown")
   fun on_keydown (fn : (evt: event) -> Unit): jquery ;
@@ -58,6 +114,11 @@ external interface jquery {
   fun show () : jquery ;
 
   fun text (x : String) : jquery ;
+
+  @JsName ("val")
+  fun value () : String ;
+  @JsName ("val")
+  fun value (x : String) : jquery ;
 }
 
 external fun jQuery (x : String = definedExternally) : jquery ;
@@ -67,8 +128,20 @@ external fun jQuery (x : Document) : jquery ;
 fun jquery.on_load (fn : (jquery.event) -> Unit) : jquery 
   = this.on ("load", fn) ;
 
+fun span_label (v:String = "") : jquery =
+  jQuery ("<span></span>").text (v) ;
+
+fun div_label (v:String = "") : jquery =
+  empty_div ().text (v) ;
+
+fun html_input (t:String = "text") : jquery =
+  jQuery ("<input>").attr ("type", t) ;
+
 fun empty_div () : jquery =
   jQuery ("<div></div>") ;
+
+fun empty_button () : jquery =
+  jQuery ("<button></button>") ;
 
 fun ahref () : jquery {
   val e = jQuery ("<a></a>") 
@@ -92,9 +165,50 @@ fun table_body () : jquery = jQuery ("<tbody></tbody>") ;
 fun table_row () : jquery = jQuery ("<tr></tr>") ;
 fun table_data () : jquery = jQuery ("<td></td>") ;
 
-// ------------------ End Helpers. ------------------
+external interface Ramda {
 
-// ------------------ Module Spec. ------------------
+  @JsName ("defaultTo")
+  fun <T> default_to (t : T, x : Any?) : T ;
+
+  @JsName ("isNil")
+  fun is_nil (x : Any?) : Boolean ;
+}
+
+external val R : Ramda ;
+
+external fun parseInt (x : String) : Any? ;
+external fun parseFloat (x : String) : Any? ;
+
+fun as_int (df : Int, x : String) : Int {
+  return R.default_to<Int> (df, parseInt (x)) ;
+}
+
+fun as_double (df : Double, x : String) : Double {
+  return R.default_to<Double> (df, parseFloat (x)) ;
+}
+
+fun ok_dialog (msg : String) : Unit {
+  val dialog = empty_div ()
+    .css ("position", "absolute")
+    .css ("top", "0px")
+    .css ("bottom", "0px")
+    .css ("z-index", "300")
+    .css ("opacity", "1")
+    .css ("background-color", "white")
+    .append (empty_div ().text (msg))
+  ;
+
+  dialog
+    .append (empty_button ()
+      .text ("Ok")
+      .on_click ({ _ -> dialog.remove () }))
+    .on ("dragover drop", { evt -> evt.stop_propagation () })
+    .inner_width (jQuery (window).inner_width ())
+    .inner_height (jQuery (window).inner_height ())
+    .prepend_to (jQuery ("body"))
+}
+
+// ------------------ End Helpers. ------------------
 
 typealias is_opened = Boolean ;
 val is_opened_true = true ;
@@ -388,6 +502,10 @@ fun process (ast : app_state, stim : stimulus) : Array<command> {
         cmd_set_state (appst_game (false)) ,
         cmd_game_init_replay
       )
+      is stls_menu_designer -> arrayOf (
+        cmd_set_state (appst_designer) ,
+        cmd_select_ui (ui_designer) ,
+        cmd_transfer_to_designer )
 
       else -> arrayOf ()
     }
@@ -457,6 +575,13 @@ fun process (ast : app_state, stim : stimulus) : Array<command> {
       else -> arrayOf<command> ()
     }
 
+    is appst_designer -> when (stim) {
+      is stls_back_from_designer -> arrayOf (
+        cmd_set_state (appst_menu),
+        cmd_select_ui (ui_menu))
+      else -> arrayOf<command> ()
+    }
+
     else -> arrayOf ()
   }
 }
@@ -497,7 +622,9 @@ enum class json_keys (val str : String) {
   starting_fuel ("starting_fuel") ,
   tick_cost ("tick_cost") ,
   move_cost ("move_cost") ,
-  map_name ("name")
+  map_name ("name") ,
+  key_fuel ("key_fuel") ,
+  door_keys ("door_keys") ,
 }
 
 fun <T> Json.uget (key : json_keys) : T = this[key.str].unsafeCast<T> () ;
@@ -505,6 +632,19 @@ fun <T> Json.uget (key : String) : T = this[key].unsafeCast<T> () ;
 
 fun coord_key (c : coords) : String = "${c.row}_${c.col}" ;
 fun coord_key (row : Int, col : Int) = "${row}_${col}" ;
+
+fun loc_to_decor (l : location) : String {
+  return when (l) {
+    is loc_empty -> "."
+    is loc_player -> "P"
+    is loc_wall -> "+"
+    is loc_key -> "$"
+    is loc_door -> when (l.opened) {
+      true -> "!"
+      false -> "X"
+    }
+  }
+}
 
 fun loc_to_string (l : location) : String {
   return when (l) {
@@ -546,6 +686,17 @@ fun json_to_map (rows : Int, cols : Int, raw_board : Json) : loc_map {
     ir ++ ;
   }
   return board ;
+}
+
+fun map_to_json (board : loc_map) : Json {
+  val result = JSON.parse<Json> ("{}") ;
+  for ((ir, row) in board.withIndex ()) {
+    for ((ic, loc) in row.withIndex ()) {
+      result.set (coord_key (ir, ic), loc_to_string (loc)) ;
+    }
+  }
+
+  return result ;
 }
 
 fun json_to_coord_hash (rows : Int, cols : Int, raw : Json ,
@@ -619,15 +770,72 @@ fun json_to_level (raw : Json) : level {
 
 class existing_level constructor (val raw_data : String) {
 
-  fun verify () : level? {
-    val lvl = json_to_level (JSON.parse<Json> (raw_data)) ;
-    if (loc_map_valid (lvl.board)) {
-      return lvl ;
-    } else {
-      return null ;
+  var rows = 0 ;
+  var cols = 0 ;
+
+  var key_fuel_int = hashMapOf<coords, Int> () ;
+  var door_keys_int = hashMapOf<coords, Int> () ;
+  var player_config = hashMapOf<coords, player_config_tile> () ;
+  var board : loc_map = mutableListOf () ;
+
+  fun setup (r : Int, c : Int) : Unit {
+    rows = r ;
+    cols = c ;
+
+    key_fuel_int = hashMapOf<coords, Int> () ;
+    door_keys_int = hashMapOf<coords, Int> () ;
+    player_config = hashMapOf<coords, player_config_tile> () ;
+    board = mutableListOf () ;
+
+    var ir = 0 ;
+    while (ir < rows) {
+      var ic = 0 ;
+      var row = mutableListOf<location> () ;
+      board.add (row) ;
+      while (ic < cols) {
+        row.add (loc_empty) ;
+        ic ++ ;
+      }
+      ir ++ ;
     }
   }
 
+  fun verify () : Boolean {
+    try {
+      val raw = JSON.parse<Json> (raw_data) ;
+      rows = raw.uget<Int> (json_keys.rows) ;
+      cols = raw.uget<Int> (json_keys.cols) ;
+      board = json_to_map (rows, cols, raw.uget<Json> (json_keys.board)) ;
+      if ( ! loc_map_valid (board)) {
+        return false ;
+      }
+
+      key_fuel_int = hashMapOf<coords, Int> () ;
+      json_to_coord_hash (rows, cols, raw.uget<Json> (json_keys.key_fuel), 
+        { c, v -> if (! R.is_nil (v)) {
+            key_fuel_int.put (c, v.unsafeCast<Int> ()) ;
+          } 
+        }) ;
+
+      door_keys_int = hashMapOf<coords, Int> () ;
+      json_to_coord_hash (rows, cols, raw.uget<Json> (json_keys.door_keys),
+        { c, v -> if (! R.is_nil (v)) {
+            door_keys_int.put (c, v.unsafeCast<Int> ()) ;
+          }
+        }) ;
+
+      player_config = hashMapOf<coords, player_config_tile> () ;
+      json_to_coord_hash (rows, cols, raw.uget<Json> (json_keys.player_config),
+        { c, v -> if (! R.is_nil (v)) {
+            player_config.put (c, json_to_player_config_tile (v.unsafeCast<Json> ())) ;
+          }
+        }) ;
+
+      return true ;
+    } catch (e : Throwable) {
+      return false ;
+    }
+  }
 }
 
 sealed class designer_stimulus ;
@@ -683,7 +891,7 @@ object dstate_edit_verifying : designer_state () ;
 object dstate_finalizing : designer_state () ;
 object dstate_exiting : designer_state () ;
 
-// ------------------ End Spec. ------------------
+val cls_maze_table = "maze-table" ;
 
 val demo_level : level = level (
   mutableListOf (
@@ -720,6 +928,7 @@ class UiMenu constructor (
   val info_link = ahref () ;
 
   val levels = empty_div () ;
+  val designer = empty_div () ;
 
   fun setup () {
     parent.append (root) ;
@@ -736,6 +945,13 @@ class UiMenu constructor (
     ;
 
     info_link.on_click ({ send (stls_menu_game_info) ; })
+
+    designer.append_to (root) ;
+
+    ahref ()
+      .text ("Level Designer")
+      .append_to (designer)
+      .on_click ({ send (stls_menu_designer) })
   }
 
   fun populate_levels (ls: Array<level>) {
@@ -760,7 +976,7 @@ class UiGame constructor (
   )
 {
 
-  val cls_game = "game-main" ;
+  val cls_game = cls_maze_table ;
   val cls_fuel = "game-fuel" ;
   val cls_keys = "game-keys" ;
   val cls_doors = "game-doors" ;
@@ -806,7 +1022,7 @@ class UiGame constructor (
         val r = table_row ().append_to (tb) ;
         for ((col, l) in lr.withIndex ()) {
           val d = table_data ().append_to (r) ;
-          decorate_cell (d, l) ;
+          d.text (loc_to_decor (l)) ;
           cells.put (coords (row, col), d) ;
         }
       }
@@ -817,19 +1033,6 @@ class UiGame constructor (
     fuel_area.text ("Fuel : $curf / $mf") ;
   }
 
-  fun decorate_cell (cell : jquery, l : location) {
-    when (l) {
-      is loc_empty -> cell.text (".")
-      is loc_player -> cell.text ("P")
-      is loc_wall -> cell.text ("+")
-      is loc_key -> cell.text ("$")
-      is loc_door -> when (l.opened) {
-        false -> cell.text ("X")
-        true -> cell.text ("!")
-      }
-    }
-  }
-
   fun update_coords (c : coords, l : location) {
     val _board = board ;
     _board ?. let {
@@ -837,7 +1040,7 @@ class UiGame constructor (
       lr[c.col] = l ;
       val cell = cells[c] ;
       cell ?. let {
-        decorate_cell (cell, l) ;
+        cell.text (loc_to_decor (l)) ;
       }
     }
   }
@@ -846,38 +1049,120 @@ class UiGame constructor (
 typealias dproc_resp_type = Pair<designer_state, Array<designer_command>> ;
 
 class UiDesigner constructor (
-  @JsName ("container") val parent : jquery
+  @JsName ("container") val parent : jquery ,
+  val send_to_menu : (stimulus) -> Unit
   )
 {
 
   val root = empty_div () ;
+  fun hide () : Unit = root.hide ()._discard () ;
+  fun show () : Unit = root.show ()._discard () ;
 
   var painting_activated = false ;
-  var current_brush = loc_empty ;
-  var board : loc_map = mutableListOf () ;
-  var state = dstate_just_started ;
+  var current_brush : location = loc_empty ;
+  var state : designer_state = dstate_just_started ;
 
   fun board_tile (c : coords) : location {
-    return board[c.row][c.col] ;
+    return current_existing.board[c.row][c.col] ;
   }
 
   val file_picker = empty_div () ;
+  val size_picker = empty_div () ;
   val editor = empty_div () ;
   val finalizer = empty_div () ;
 
+  val new_file_button = empty_button () ;
+  val input_size_rows = html_input ().value ("5") ;
+  val input_size_cols = html_input ().value ("5") ;
+
+  fun quit_button (l : String = "Quit") : jquery =
+    empty_button ()
+    .text (l)
+    .on_click ({ _ -> 
+      send (ds_quit) ;
+    }) ;
+
+  val canvas = empty_div () ;
+
+  // uidg setup
   fun setup () {
     parent.append (root) ;
     root
       .append (file_picker)
+      .append (size_picker)
       .append (editor)
       .append (finalizer)
     ;
+
+    empty_div ()
+      .text ("click new for a new map, or drag-drop an existing map")
+      .append_to (file_picker) ;
+
+    new_file_button
+      .text ("New")
+      .append_to (file_picker)
+      .on_click ({ _ -> send (ds_new) }) ;
+  
+    br ().append_to (file_picker) ;
+    quit_button ().append_to (file_picker) ;
+
+    div_label ("Specify size").append_to (size_picker) ;
+
+    span_label ("Rows : ").append_to (size_picker) ;
+    input_size_rows.append_to (size_picker) ;
+    br ().append_to (size_picker) ;
+    span_label ("Cols : ").append_to (size_picker) ;
+    input_size_cols.append_to (size_picker) ;
+    br ().append_to (size_picker) ;
+    empty_button ()
+      .text ("Next")
+      .append_to (size_picker)
+      .on_click ({ _ ->
+        val rows = as_int (0, input_size_rows.value ()) ;
+        val cols = as_int (0, input_size_cols.value ()) ;
+
+        if (rows < 2 || rows > 100 || cols < 2 || cols > 100) {
+          ok_dialog ("invalid size, constraint : 2 <= rows,cols <= 100") ;
+        } else {
+          send (ds_map_size_specified (rows, cols)) ;
+        }
+      })
+    ;
+    br ().append_to (size_picker) ;
+    quit_button ().append_to (size_picker) ;
+
+    span_label ("Brushes: ").append_to (editor) ;
+    empty_button ()
+      .text ("Empty")
+      .append_to (editor)
+      .on_click ({ _ -> send (ds_brush_click (loc_empty)) })
+    empty_button ()
+      .text ("Player")
+      .append_to (editor)
+      .on_click ({ _ -> send (ds_brush_click (loc_player)) })
+    empty_button ()
+      .text ("Wall")
+      .append_to (editor)
+      .on_click ({ _ -> send (ds_brush_click (loc_wall)) })
+    empty_button ()
+      .text ("Key")
+      .append_to (editor)
+      .on_click ({ _ -> send (ds_brush_click (loc_key)) })
+    empty_button ()
+      .text ("Door")
+      .append_to (editor)
+      .on_click ({ _ -> send (ds_brush_click (loc_door (false))) })
+
+    canvas
+      .css ("padding", "3rem")
+      .append_to (editor) ;
+
+    canvas.on ("mouseup", { send (ds_canvas_mouse_up) }) ;
   }
 
   fun reset () {
     painting_activated = false ;
     current_brush = loc_empty ;
-    board = mutableListOf () ;
     state = dstate_just_started ;
   }
 
@@ -1051,9 +1336,29 @@ class UiDesigner constructor (
     }
   }
 
+  fun send (stim : designer_stimulus) : Unit {
+    val curst = state ;
+    sched (0, {
+      val (nstate, cmds) = process (curst, stim) ;
+      state = nstate ;
+      for (cmd in cmds) {
+        run_command (cmd) ;
+      }
+    }) ;
+  }
+
+  fun file_dropped (contents : String) : Unit {
+    send (ds_existing (existing_level (contents))) ;
+  }
+
   fun show_file_picker () : Unit {
     root.children ().hide () ;
     file_picker.show () ;
+  }
+
+  fun show_size_picker () : Unit {
+    root.children ().hide () ;
+    size_picker.show () ;
   }
 
   fun show_editor () : Unit {
@@ -1061,23 +1366,74 @@ class UiDesigner constructor (
     editor.show () ;
   }
 
+  var canvas_body = table_body () ;
+
+  fun setup_editor () : Unit {
+    val table = table ().add_class (cls_maze_table) ;
+    table.append_to (canvas) ;
+    table.append (table_head ()) ;
+    canvas_body = table_body () ;
+    table.append (canvas_body) ;
+
+    for ((ir,row) in current_existing.board.withIndex ()) {
+      val trow = table_row () ;
+      canvas_body.append (trow) ;
+      for ((ic,loc) in row.withIndex ()) {
+        val td = table_data () ;
+        trow.append (td) ;
+        td.text (loc_to_decor (loc)) ;
+        td
+          .on ("mousedown", 
+            { _ -> send (ds_canvas_mouse_down (coords (ir, ic))) }) 
+          .on ("mouseover",
+            { _ -> send (ds_canvas_mouse_in (coords (ir, ic))) })
+        ;
+      }
+    }
+  }
+
   fun show_finalizer () : Unit {
     root.children ().hide () ;
     finalizer.show () ;
   }
 
+  var current_existing = existing_level ("") ;
+
+  fun run () {
+    reset () ;
+    send (ds_started) ;
+  }
+
+  // uidg run_command
   fun run_command (cmd : designer_command) {
     when (cmd) {
-      is dcmd_show_new_or_existing -> { }
-      is dcmd_verify_dropped_file -> { }
-      is dcmd_load_dropped_file -> { }
+      is dcmd_show_new_or_existing -> show_file_picker ()
+      is dcmd_verify_dropped_file -> when (cmd.lvl.verify ()) {
+        true -> {
+          current_existing = cmd.lvl ;
+          send (ds_existing_verified (true))
+        }
+        false -> send (ds_existing_verified (false))
+      }
+      is dcmd_load_dropped_file -> { 
+        setup_editor () ;
+        show_editor () ;
+      }
       is dcmd_discard_dropped_file -> { }
-      is dcmd_show_size_picker -> { }
-      is dcmd_load_new_file -> { }
-      is dcmd_back_to_menu -> { }
-      is dcmd_activate_painting -> { }
-      is dcmd_paint_at_coord -> { }
-      is dcmd_pick_brush -> { }
+      is dcmd_show_size_picker -> show_size_picker () 
+      is dcmd_load_new_file -> { 
+        current_existing.setup (cmd.rows, cmd.cols) ;
+        setup_editor () ;
+        show_editor () ;
+      }
+      is dcmd_back_to_menu -> send_to_menu (stls_back_from_designer)
+      is dcmd_activate_painting -> { painting_activated = cmd.bv }
+      is dcmd_paint_at_coord -> {
+        current_existing.board[cmd.c.row][cmd.c.col] = cmd.l ;
+        canvas_body.children ().eq (cmd.c.row).children ().eq (cmd.c.col)
+          .text (loc_to_decor (cmd.l)) ;
+      }
+      is dcmd_pick_brush -> { current_brush = cmd.l }
       is dcmd_enable_brush_picker -> { }
       is dcmd_hide_config -> { }
       is dcmd_show_selection -> { }
@@ -1085,9 +1441,10 @@ class UiDesigner constructor (
       is dcmd_showadd_key_config -> { }
       is dcmd_showadd_door_config -> { }
       is dcmd_showadd_map_config -> { }
-      is dcmd_verify_editing -> { }
+      is dcmd_verify_editing -> send ( ds_editing_verified (
+        current_existing.verify ()))
       is dcmd_show_map_invalid -> { }
-      is dcmd_show_done_screen -> { }
+      is dcmd_show_done_screen -> show_finalizer ()
       is dcmd_prepare_file -> { }
       is dcmd_offer_download -> { }
       is dcmd_add_to_menu -> { }
@@ -1100,6 +1457,21 @@ class Executor {
   var m_app_state : app_state = appst_launched ;
 
   fun run () : Unit {
+
+    jQuery (window).on ("dragover", { evt ->
+      evt.prevent_default () ;
+    }) ;
+
+    jQuery (window).on ("drop", { evt ->
+      evt.prevent_default () ;
+
+      val files = evt.original_event.data_transfer.files ;
+
+      if (files.length == 1) {
+        file_dropped (files.item (0)) ;
+      }
+    }) ;
+
     send (stls_launched) ;
   }
 
@@ -1165,6 +1537,7 @@ class Executor {
           }
         }
       }
+      is cmd_transfer_to_designer -> m_ui_designer.run ()
       else -> { }
     }
   }
@@ -1197,12 +1570,13 @@ class Executor {
   val m_ui_game = UiGame (m_main, { s -> send (s) }, { selected_level }) ;
   val m_ui_postgame = empty_div () ;
   val m_ui_menu = UiMenu (m_main, { s -> send (s) })
-  val m_ui_designer = empty_div () ;
+  val m_ui_designer = UiDesigner (m_main, { s -> send (s) })
   val m_ui_replay = empty_div () ;
 
   fun setup_ui () : Unit {
     m_ui_menu.setup () ;
     m_ui_game.setup () ;
+    m_ui_designer.setup () ;
     m_main.children ().hide () ;
     jQuery (document).on_keydown ({ evt -> key_released (evt.which) }) ;
   }
@@ -1290,12 +1664,20 @@ class Executor {
       }
     }
   }
+
+  fun file_dropped (f : file_interface) : Unit {
+    if (f.is_json () && f.size < 1000000) {
+      val reader = file_reader () ;
+      reader.read_text_file (f, { _ ->
+        // FIXME: tell ui handlers about file
+      }) ;
+    }
+  }
 }
 
 var executor : Executor? = null ;
 
 fun main (s : Array<String>) {
-  println (current_time ()) ;
   jQuery (window).on_load ( {
     executor = Executor () ;
     executor?.run () ;

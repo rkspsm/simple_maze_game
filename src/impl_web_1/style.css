@@ -2,7 +2,12 @@
   font-weight : bold ;
 }
 
-.game-main {
+.maze-table {
   font-family : monospace ;
+  cursor : crosshair ;
+  -webkit-user-select : none ;
+  -moz-user-select : none ;
+  -ms-user-select : none ;
+  user-select : none ;
 }
 
