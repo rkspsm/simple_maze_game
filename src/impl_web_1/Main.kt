@@ -12,7 +12,7 @@ import kotlin.text.StringBuilder ;
 
 fun Any?._discard () = Unit ;
 
-fun current_time () : Double { return Date ().getTime () ; }
+fun current_time () : Double { return js ("Date.now ()") ; }
 fun sched (ms : Double, fn : () -> Unit) = window.setTimeout (fn, ms.toInt ()) ;
 fun sched (ms : Int, fn : () -> Unit) = window.setTimeout (fn, ms) ;
 
@@ -317,6 +317,7 @@ data class stls_menu_level_selected (val li : level_index) : stimulus () ;
 object stls_menu_designer : stimulus () ;
 object stls_menu_replay : stimulus () ;
 object stls_menu_game_info : stimulus () ;
+object stls_back_from_designer : stimulus () ;
 
 data class stls_game_moved (val m : movement) : stimulus () ;
 object stls_game_tick : stimulus () ;
@@ -350,6 +351,7 @@ object cmd_postgame_reset_map : command () ;
 data class cmd_postgame_set_theme (val is_vict : is_victorious) : command () ;
 object cmd_postgame_prepare_replay : command () ;
 object cmd_postgame_offer_replay_download : command () ;
+object cmd_transfer_to_designer : command () ;
 
 fun process (ast : app_state, stim : stimulus) : Array<command> {
 
@@ -468,6 +470,69 @@ data class level (
 
 }
 
+sealed class designer_mode ;
+object dsm_painting : designer_mode () ;
+object dsm_configuring : designer_mode () ;
+
+class existing_level constructor (val raw_data : String) {
+
+}
+
+sealed class designer_stimulus ;
+object ds_started : designer_stimulus () ;
+object ds_new : designer_stimulus () ;
+data class ds_existing (val lvl : existing_level) : designer_stimulus () ;
+data class ds_existing_verified (val success : Boolean) : designer_stimulus () ;
+data class ds_map_size_specified (val rows : Int, val cols : Int) : designer_stimulus () ;
+object ds_quit : designer_stimulus () ;
+data class ds_canvas_mouse_down (val c : coords) : designer_stimulus () ;
+data class ds_canvas_mouse_in (val c : coords) : designer_stimulus () ;
+object ds_canvas_mouse_up : designer_stimulus () ;
+data class ds_brush_click (val l : location) : designer_stimulus () ;
+data class ds_mode_picked (val m : designer_mode) : designer_stimulus () ;
+object ds_done : designer_stimulus () ;
+data class ds_editing_verified (val bv : Boolean) : designer_stimulus () ;
+object ds_download : designer_stimulus () ;
+object ds_add_to_menu : designer_stimulus () ;
+
+sealed class designer_command ;
+object dcmd_show_new_or_existing : designer_command () ;
+data class dcmd_verify_dropped_file (val lvl : existing_level) : designer_command () ;
+object dcmd_load_dropped_file : designer_command () ;
+object dcmd_discard_dropped_file : designer_command () ;
+object dcmd_show_size_picker : designer_command () ;
+data class dcmd_load_new_file (val rows : Int, val cols : Int) : designer_command () ;
+object dcmd_back_to_menu : designer_command () ;
+data class dcmd_activate_painting (val bv : Boolean) : designer_command () ;
+data class dcmd_paint_at_coord (val c : coords, val l : location) : designer_command () ;
+data class dcmd_pick_brush (val l : location) : designer_command () ;
+data class dcmd_enable_brush_picker (val bv : Boolean) : designer_command () ;
+object dcmd_hide_config : designer_command () ;
+data class dcmd_show_selection (val c : coords) : designer_command () ;
+object dcmd_clear_selection : designer_command () ;
+data class dcmd_showadd_key_config (val c : coords) : designer_command () ;
+data class dcmd_showadd_door_config (val c : coords) : designer_command () ;
+data class dcmd_showadd_map_config (val c : coords) : designer_command () ;
+object dcmd_verify_editing : designer_command () ;
+object dcmd_show_map_invalid : designer_command () ;
+object dcmd_show_done_screen : designer_command () ;
+object dcmd_prepare_file : designer_command () ;
+object dcmd_offer_download : designer_command () ;
+object dcmd_add_to_menu : designer_command () ;
+
+sealed class designer_state ;
+object dstate_just_started : designer_state () ;
+object dstate_file_picking : designer_state () ;
+object dstate_size_picking : designer_state () ;
+object dstate_drop_verifying : designer_state () ;
+object dstate_painting : designer_state () ;
+object dstate_configuring : designer_state () ;
+object dstate_edit_verifying : designer_state () ;
+object dstate_finalizing : designer_state () ;
+object dstate_exiting : designer_state () ;
+
+// ------------------ End Spec. ------------------
+
 val demo_level : level = level (
   mutableListOf (
     mutableListOf<location> (loc_empty, loc_empty, loc_empty, loc_empty, loc_empty) ,
@@ -483,8 +548,6 @@ val demo_level : level = level (
   game_fuel (20) ,
   "Demo-01"
 ) ;
-
-// ------------------ End Spec. ------------------
 
 class UiMenu constructor (
   @JsName ("container") val parent : jquery ,
@@ -642,6 +705,230 @@ class UiGame constructor (
         decorate_cell (cell, l) ;
       }
     }
+  }
+}
+
+typealias dproc_resp_type = Pair<designer_state, Array<designer_command>> ;
+
+class UiDesigner constructor (
+  @JsName ("container") val parent : jquery
+  )
+{
+
+  val root = empty_div () ;
+
+  var painting_activated = false ;
+  var current_brush = loc_empty ;
+  var board : loc_map = mutableListOf () ;
+  var state = dstate_just_started ;
+
+  fun board_tile (c : coords) : location {
+    return board[c.row][c.col] ;
+  }
+
+  val file_picker = empty_div () ;
+  val editor = empty_div () ;
+  val finalizer = empty_div () ;
+
+  fun setup () {
+    parent.append (root) ;
+    root
+      .append (file_picker)
+      .append (editor)
+      .append (finalizer)
+    ;
+  }
+
+  fun reset () {
+    painting_activated = false ;
+    current_brush = loc_empty ;
+    board = mutableListOf () ;
+    state = dstate_just_started ;
+  }
+
+  fun process (st : designer_state , sim : designer_stimulus) :
+    Pair<designer_state, Array<designer_command>>
+  {
+
+    val nothing = Pair (st, arrayOf<designer_command> ()) ;
+
+    return when (sim) {
+      // dproc_started
+      is ds_started -> when (st) {
+        is dstate_just_started -> Pair (dstate_file_picking, 
+          arrayOf<designer_command> (dcmd_show_new_or_existing))
+        else -> nothing
+      }
+
+      // dproc_new_option
+      is ds_new -> when (st) {
+        is dstate_file_picking -> Pair (dstate_size_picking,
+          arrayOf<designer_command> (dcmd_show_size_picker))
+        else -> nothing
+      }
+
+      // dproc_new_painting
+      is ds_map_size_specified -> when (st) {
+        is dstate_size_picking -> Pair (dstate_painting, arrayOf (
+          dcmd_load_new_file (sim.rows, sim.cols) ,
+          dcmd_pick_brush (loc_empty) ,
+          dcmd_hide_config ))
+        else -> nothing
+      }
+
+      // dproc_existing_dropped
+      is ds_existing -> when (st) {
+        is dstate_file_picking -> Pair (dstate_drop_verifying,
+          arrayOf<designer_command> (dcmd_verify_dropped_file (sim.lvl)))
+        else -> nothing
+      }
+
+      is ds_existing_verified -> when (sim.success) {
+        // dproc_existing_verified
+        true -> when (st) {
+          is dstate_drop_verifying -> Pair (dstate_painting, arrayOf (
+            dcmd_load_dropped_file ,
+            dcmd_pick_brush (loc_empty) ,
+            dcmd_hide_config ))
+          else -> nothing
+        }
+        // dproc_existing_failed_verification
+        false -> when (st) {
+          is dstate_drop_verifying -> dproc_resp_type (dstate_file_picking, arrayOf (
+            dcmd_show_map_invalid ,
+            dcmd_discard_dropped_file ))
+          else -> nothing
+        }
+      }
+
+      is ds_canvas_mouse_down -> when (st) {
+        // dproc_mouse_down_canvas
+        is dstate_painting -> Pair (dstate_painting, arrayOf (
+          dcmd_activate_painting (true) ,
+          dcmd_paint_at_coord (sim.c, current_brush) ))
+        is dstate_configuring -> when (board_tile (sim.c)) {
+          // dproc_configuring_player
+          is loc_player -> Pair (dstate_configuring, arrayOf (
+            dcmd_hide_config ,
+            dcmd_showadd_map_config (sim.c) ,
+            dcmd_clear_selection ,
+            dcmd_show_selection (sim.c) ))
+          // dproc_configuring_door
+          is loc_door -> Pair (dstate_configuring, arrayOf (
+            dcmd_hide_config ,
+            dcmd_showadd_door_config (sim.c) ,
+            dcmd_clear_selection ,
+            dcmd_show_selection (sim.c) ))
+          // dproc_configuring_key
+          is loc_key -> Pair (dstate_configuring, arrayOf (
+            dcmd_hide_config ,
+            dcmd_showadd_key_config (sim.c) ,
+            dcmd_clear_selection ,
+            dcmd_show_selection (sim.c) ))
+          else -> nothing
+        }
+        else -> nothing
+      }
+
+      // dproc_mouse_in_canvas
+      is ds_canvas_mouse_in -> when (st) {
+        is dstate_painting -> when (painting_activated) {
+          true -> Pair ( dstate_painting ,
+            arrayOf<designer_command> (dcmd_paint_at_coord (sim.c, current_brush)))
+          false -> nothing
+        }
+        else -> nothing
+      }
+
+      // dproc_mouse_up_canvas
+      is ds_canvas_mouse_up -> when (st) {
+        is dstate_painting -> when (painting_activated) {
+          true -> Pair ( dstate_painting ,
+            arrayOf<designer_command> (dcmd_activate_painting (false)))
+          false -> nothing
+        }
+        else -> nothing
+      }
+
+      // dproc_brush_selected
+      is ds_brush_click -> when (st) {
+        is dstate_painting -> Pair (dstate_painting ,
+          arrayOf<designer_command> (dcmd_pick_brush (sim.l)))
+        else -> nothing
+      }
+
+      is ds_mode_picked -> when (sim.m) {
+        // dproc_mode_to_configuring
+        is dsm_configuring -> when (st) {
+          is dstate_painting -> Pair (dstate_configuring , arrayOf (
+            dcmd_enable_brush_picker (false) ,
+            dcmd_hide_config ,
+            dcmd_clear_selection ))
+          else -> nothing
+        }
+        // dproc_mode_to_painting
+        is dsm_painting -> when (st) {
+          is dstate_configuring -> Pair (dstate_painting , arrayOf (
+            dcmd_hide_config ,
+            dcmd_enable_brush_picker (true) ,
+            dcmd_clear_selection ))
+          else -> nothing
+        }
+      }
+
+      // dproc_verifying_editing
+      is ds_done -> when (st) {
+        is dstate_configuring -> Pair (dstate_edit_verifying ,
+          arrayOf<designer_command> ( dcmd_verify_editing ))
+        else -> nothing
+      }
+
+      is ds_editing_verified -> when (st) {
+        is dstate_edit_verifying -> when (sim.bv) {
+          // dproc_verifying_failed
+          false -> Pair (dstate_configuring ,
+            arrayOf<designer_command> ( dcmd_hide_config ))
+          // dproc_verifying_success
+          true -> dproc_resp_type (dstate_finalizing , arrayOf (
+            dcmd_prepare_file ,
+            dcmd_show_done_screen ))
+          }
+        else -> nothing
+      }
+
+      // dproc_downloading
+      is ds_download -> when (st) {
+        is dstate_finalizing -> Pair (dstate_finalizing ,
+          arrayOf<designer_command> ( dcmd_offer_download ))
+        else -> nothing
+      }
+
+      // dproc_adding_to_menu
+      is ds_add_to_menu -> when (st) {
+        is dstate_finalizing -> Pair (dstate_finalizing ,
+          arrayOf<designer_command> ( dcmd_add_to_menu ))
+        else -> nothing
+      }
+
+      // dproc_back_to_menu
+      is ds_quit -> Pair (dstate_exiting,
+        arrayOf<designer_command> ( dcmd_back_to_menu ))
+    }
+  }
+
+  fun show_file_picker () : Unit {
+    root.children ().hide () ;
+    file_picker.show () ;
+  }
+
+  fun show_editor () : Unit {
+    root.children ().hide () ;
+    editor.show () ;
+  }
+
+  fun show_finalizer () : Unit {
+    root.children ().hide () ;
+    finalizer.show () ;
   }
 }
 
@@ -845,6 +1132,7 @@ class Executor {
 var executor : Executor? = null ;
 
 fun main (s : Array<String>) {
+  println (current_time ()) ;
   jQuery (window).on_load ( {
     executor = Executor () ;
     executor?.run () ;

@@ -174,6 +174,7 @@ Inductive stimulus :=
 | stls_menu_designer
 | stls_menu_replay
 | stls_menu_game_info
+| stls_back_from_designer
     
 | stls_game_moved : movement -> stimulus
 | stls_game_tick
@@ -207,6 +208,8 @@ Inductive command :=
 | cmd_postgame_set_theme : is_victorious -> command
 | cmd_postgame_prepare_replay
 | cmd_postgame_offer_replay_download
+
+| cmd_transfer_to_designer
 .
 
 Inductive process : app_state -> stimulus -> list command -> Prop :=
@@ -232,6 +235,17 @@ Inductive process : app_state -> stimulus -> list command -> Prop :=
                 cmd_set_state (appst_game false) ;
                 cmd_game_init_replay
             ]
+
+| proc_menu_designer :
+    process appst_menu (stls_menu_designer)
+            [ cmd_set_state appst_designer ;
+                cmd_select_ui ui_designer ;
+                cmd_transfer_to_designer ]
+
+| proc_back_from_designer :
+    process appst_designer (stls_back_from_designer)
+            [ cmd_set_state appst_menu ;
+                cmd_select_ui ui_menu ]
 
 | proc_game_tick :
     process (appst_game is_paused_false) stls_game_tick
@@ -384,6 +398,8 @@ Inductive designer_command :=
 | dcmd_pick_brush : location -> designer_command
 | dcmd_enable_brush_picker : bool -> designer_command
 | dcmd_hide_config
+| dcmd_show_selection : coords -> designer_command
+| dcmd_clear_selection
 | dcmd_showadd_key_config : coords -> designer_command
 | dcmd_showadd_door_config : coords -> designer_command
 | dcmd_showadd_map_config : coords -> designer_command
@@ -478,34 +494,40 @@ Inductive designer_process :
     designer_process (ds_mode_picked dsm_configuring)
                      dstate_painting dstate_configuring
                      [ dcmd_enable_brush_picker false ;
-                         dcmd_hide_config ]
+                         dcmd_hide_config ;
+                         dcmd_clear_selection ]
 
 | dproc_mode_to_painting :
     designer_process (ds_mode_picked dsm_painting)
                      dstate_configuring dstate_painting
                      [ dcmd_hide_config ;
-                         dcmd_enable_brush_picker true ]
+                         dcmd_enable_brush_picker true ;
+                         dcmd_clear_selection ]
 
 | dproc_configuring_player : forall c,
     designer_board_tile c loc_player ->
     designer_process (ds_canvas_mouse_down c)
                      dstate_configuring dstate_configuring
                      [ dcmd_hide_config ;
-                         dcmd_showadd_map_config c ]
+                         dcmd_showadd_map_config c ;
+                         dcmd_clear_selection ;
+                         dcmd_show_selection c ]
 
 | dproc_configuring_door : forall c f,
     designer_board_tile c (loc_door f) ->
     designer_process (ds_canvas_mouse_down c)
                      dstate_configuring dstate_configuring
                      [ dcmd_hide_config ;
-                         dcmd_showadd_door_config c ]
+                         dcmd_showadd_door_config c ;
+                         dcmd_show_selection c ]
 
 | dproc_configuring_key : forall c,
     designer_board_tile c loc_key ->
     designer_process (ds_canvas_mouse_down c)
                      dstate_configuring dstate_configuring
                      [ dcmd_hide_config ;
-                         dcmd_showadd_key_config c ]
+                         dcmd_showadd_key_config c ;
+                         dcmd_show_selection c ]
 
 | dproc_verifying_editing :
     designer_process ds_done
