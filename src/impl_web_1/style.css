@@ -1,3 +1,12 @@
+html,body {
+  background-color : #91ba68 ;
+}
+
+button {
+  background-color : green ;
+  color : white ;
+}
+
 .menu-title {
   font-weight : bold ;
 }
@@ -9,5 +18,44 @@
   -moz-user-select : none ;
   -ms-user-select : none ;
   user-select : none ;
+  border : 10px solid black ;
+}
+
+.maze-table td.location {
+  width : 8px ;
+  height : 8px ;
+  text-align : center ;
+  vertical-align : middle ;
+}
+
+.maze-table.design-phase td.location {
+  width : 50px ;
+  height : 50px ;
+}
+
+.maze-table td.location.loc_empty {
+  background-color : #91ba68 ;
+}
+
+.maze-table td.location.loc_player {
+  background-color : #6700a3 ;
+  color : white ;
+}
+
+.maze-table td.location.loc_wall {
+  background-color : black ;
+}
+
+.maze-table td.location.loc_key {
+  background-color : green ;
+}
+
+.maze-table td.location.loc_door_open {
+  background-color : white ;
+}
+
+.maze-table td.location.loc_door_closed {
+  background-color : #710000 ;
+  color : white ;
 }
 

@@ -445,6 +445,7 @@ Inductive designer_process :
                      dstate_size_picking dstate_painting
                      [ dcmd_load_new_file r c ;
                          dcmd_pick_brush loc_empty ;
+                         dcmd_enable_brush_picker true ;
                          dcmd_hide_config ]
 
 | dproc_existing_dropped : forall fl,
@@ -457,6 +458,7 @@ Inductive designer_process :
                      dstate_drop_verifying dstate_painting
                      [ dcmd_load_dropped_file ;
                          dcmd_pick_brush loc_empty ;
+                         dcmd_enable_brush_picker true ;
                          dcmd_hide_config ]
 
 | dproc_existing_failed_verification :
@@ -519,6 +521,7 @@ Inductive designer_process :
                      dstate_configuring dstate_configuring
                      [ dcmd_hide_config ;
                          dcmd_showadd_door_config c ;
+                         dcmd_clear_selection ;
                          dcmd_show_selection c ]
 
 | dproc_configuring_key : forall c,
@@ -527,6 +530,7 @@ Inductive designer_process :
                      dstate_configuring dstate_configuring
                      [ dcmd_hide_config ;
                          dcmd_showadd_key_config c ;
+                         dcmd_clear_selection ;
                          dcmd_show_selection c ]
 
 | dproc_verifying_editing :

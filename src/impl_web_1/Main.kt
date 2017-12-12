@@ -80,12 +80,16 @@ external interface jquery {
   fun append_to (x : jquery) : jquery ;
   fun attr (x : String, y : String) : jquery ;
 
+  fun <T> prop (x : String) : T ;
+  fun <T> prop (x : String, v : T) : jquery ;
   fun children (x : String = definedExternally) : jquery ;
   @JsName ("click")
   fun on_click (fn : (evt: event) -> Unit) : jquery ;
   fun css (k : String, v : String) : jquery ;
 
   fun eq (x : Int) : jquery ;
+
+  fun find (x : String) : jquery ;
 
   fun hide () : jquery ;
 
@@ -125,6 +129,10 @@ external fun jQuery (x : String = definedExternally) : jquery ;
 external fun jQuery (x : Window) : jquery ;
 external fun jQuery (x : Document) : jquery ;
 
+fun jquery.checked () : Boolean = this.prop<Boolean> ("checked") ;
+fun jquery.checked (bv : Boolean) : jquery =
+  this.prop<Boolean> ("checked", bv) ;
+
 fun jquery.on_load (fn : (jquery.event) -> Unit) : jquery 
   = this.on ("load", fn) ;
 
@@ -159,7 +167,9 @@ fun unordered_list () : jquery = jQuery ("<ul></ul>") ;
 fun list_item () : jquery = jQuery ("<li></li>") ;
 fun br () : jquery = jQuery ("<br>") ;
 fun hr () : jquery = jQuery ("<hr>") ;
-fun table () : jquery = jQuery ("<table></table>") ;
+fun table () : jquery = jQuery ("<table></table>")
+  .attr ("cellspacing", "0")
+  .attr ("cellpadding", "0") ;
 fun table_head () : jquery = jQuery ("<thead></thead>") ;
 fun table_body () : jquery = jQuery ("<tbody></tbody>") ;
 fun table_row () : jquery = jQuery ("<tr></tr>") ;
@@ -187,7 +197,9 @@ fun as_double (df : Double, x : String) : Double {
   return R.default_to<Double> (df, parseFloat (x)) ;
 }
 
-fun ok_dialog (msg : String) : Unit {
+fun ok_dialog (msg : String, _extra : jquery? = null) : Unit {
+  val extra = _extra ?: empty_div () ;
+
   val dialog = empty_div ()
     .css ("position", "absolute")
     .css ("top", "0px")
@@ -196,6 +208,7 @@ fun ok_dialog (msg : String) : Unit {
     .css ("opacity", "1")
     .css ("background-color", "white")
     .append (empty_div ().text (msg))
+    .append (extra)
   ;
 
   dialog
@@ -633,15 +646,15 @@ fun <T> Json.uget (key : String) : T = this[key].unsafeCast<T> () ;
 fun coord_key (c : coords) : String = "${c.row}_${c.col}" ;
 fun coord_key (row : Int, col : Int) = "${row}_${col}" ;
 
-fun loc_to_decor (l : location) : String {
+fun loc_to_decor_cls (l : location) : String {
   return when (l) {
-    is loc_empty -> "."
-    is loc_player -> "P"
-    is loc_wall -> "+"
-    is loc_key -> "$"
+    is loc_empty -> "location loc_empty"
+    is loc_player -> "location loc_player"
+    is loc_wall -> "location loc_wall"
+    is loc_key -> "location loc_key"
     is loc_door -> when (l.opened) {
-      true -> "!"
-      false -> "X"
+      true -> "location loc_door_open"
+      false -> "location loc_door_closed"
     }
   }
 }
@@ -1022,7 +1035,8 @@ class UiGame constructor (
         val r = table_row ().append_to (tb) ;
         for ((col, l) in lr.withIndex ()) {
           val d = table_data ().append_to (r) ;
-          d.text (loc_to_decor (l)) ;
+          //d.text (loc_to_decor (l)) ;
+          d.attr ("class", loc_to_decor_cls (l)) ;
           cells.put (coords (row, col), d) ;
         }
       }
@@ -1040,7 +1054,8 @@ class UiGame constructor (
       lr[c.col] = l ;
       val cell = cells[c] ;
       cell ?. let {
-        cell.text (loc_to_decor (l)) ;
+        //cell.text (loc_to_decor (l)) ;
+        cell.attr ("class", loc_to_decor_cls (l)) ;
       }
     }
   }
@@ -1082,6 +1097,11 @@ class UiDesigner constructor (
       send (ds_quit) ;
     }) ;
 
+  val brush_box = empty_div () ;
+  val configure_box = empty_div () ;
+  val to_config = empty_button () ;
+  val to_painting = empty_button () ;
+  val editing_done = empty_button () ;
   val canvas = empty_div () ;
 
   // uidg setup
@@ -1132,30 +1152,48 @@ class UiDesigner constructor (
     quit_button ().append_to (size_picker) ;
 
     span_label ("Brushes: ").append_to (editor) ;
+    brush_box.append_to (editor) ;
     empty_button ()
       .text ("Empty")
-      .append_to (editor)
+      .append_to (brush_box)
       .on_click ({ _ -> send (ds_brush_click (loc_empty)) })
     empty_button ()
       .text ("Player")
-      .append_to (editor)
+      .append_to (brush_box)
       .on_click ({ _ -> send (ds_brush_click (loc_player)) })
     empty_button ()
       .text ("Wall")
-      .append_to (editor)
+      .append_to (brush_box)
       .on_click ({ _ -> send (ds_brush_click (loc_wall)) })
     empty_button ()
       .text ("Key")
-      .append_to (editor)
+      .append_to (brush_box)
       .on_click ({ _ -> send (ds_brush_click (loc_key)) })
     empty_button ()
-      .text ("Door")
-      .append_to (editor)
+      .text ("Door (Closed)")
+      .append_to (brush_box)
       .on_click ({ _ -> send (ds_brush_click (loc_door (false))) })
+    empty_button ()
+      .text ("Door (Opened)")
+      .append_to (brush_box)
+      .on_click ({ _ -> send (ds_brush_click (loc_door (true))) })
 
     canvas
-      .css ("padding", "3rem")
       .append_to (editor) ;
+
+    configure_box.append_to (editor) ;
+    quit_button ().append_to (editor) ;
+    to_painting.text ("Paint")
+      .append_to (editor)
+      .on_click ({ _ -> send (ds_mode_picked (dsm_painting)) })
+    ;
+    to_config.text ("Configure")
+      .append_to (editor)
+      .on_click ({ _ -> send (ds_mode_picked (dsm_configuring)) })
+    ;
+    editing_done.text ("Finish").append_to (editor)
+      .on_click ({ _ -> send (ds_done) })
+    ;
 
     canvas.on ("mouseup", { send (ds_canvas_mouse_up) }) ;
   }
@@ -1192,6 +1230,7 @@ class UiDesigner constructor (
         is dstate_size_picking -> Pair (dstate_painting, arrayOf (
           dcmd_load_new_file (sim.rows, sim.cols) ,
           dcmd_pick_brush (loc_empty) ,
+            dcmd_enable_brush_picker (true) ,
           dcmd_hide_config ))
         else -> nothing
       }
@@ -1209,6 +1248,7 @@ class UiDesigner constructor (
           is dstate_drop_verifying -> Pair (dstate_painting, arrayOf (
             dcmd_load_dropped_file ,
             dcmd_pick_brush (loc_empty) ,
+            dcmd_enable_brush_picker (true) ,
             dcmd_hide_config ))
           else -> nothing
         }
@@ -1369,7 +1409,10 @@ class UiDesigner constructor (
   var canvas_body = table_body () ;
 
   fun setup_editor () : Unit {
-    val table = table ().add_class (cls_maze_table) ;
+    val table = table ()
+      .add_class (cls_maze_table)
+      .add_class ("design-phase")
+    ;
     table.append_to (canvas) ;
     table.append (table_head ()) ;
     canvas_body = table_body () ;
@@ -1381,7 +1424,8 @@ class UiDesigner constructor (
       for ((ic,loc) in row.withIndex ()) {
         val td = table_data () ;
         trow.append (td) ;
-        td.text (loc_to_decor (loc)) ;
+        //td.text (loc_to_decor (loc)) ;
+        td.attr ("class", loc_to_decor_cls (loc)) ;
         td
           .on ("mousedown", 
             { _ -> send (ds_canvas_mouse_down (coords (ir, ic))) }) 
@@ -1431,16 +1475,26 @@ class UiDesigner constructor (
       is dcmd_paint_at_coord -> {
         current_existing.board[cmd.c.row][cmd.c.col] = cmd.l ;
         canvas_body.children ().eq (cmd.c.row).children ().eq (cmd.c.col)
-          .text (loc_to_decor (cmd.l)) ;
+          //.text (loc_to_decor (cmd.l)) ;
+          .attr ("class", loc_to_decor_cls (cmd.l)) ;
       }
       is dcmd_pick_brush -> { current_brush = cmd.l }
-      is dcmd_enable_brush_picker -> { }
-      is dcmd_hide_config -> { }
-      is dcmd_show_selection -> { }
-      is dcmd_clear_selection -> { }
-      is dcmd_showadd_key_config -> { }
-      is dcmd_showadd_door_config -> { }
-      is dcmd_showadd_map_config -> { }
+      is dcmd_enable_brush_picker -> when (cmd.bv) {
+        true -> { brush_box.show () ; to_painting.hide () ; to_config.show () ; }
+        false -> { brush_box.hide () ; to_painting.show () ; to_config.hide () ; }
+      }
+      is dcmd_hide_config -> {
+        save_config () ;
+        configure_box.hide () ;
+      }
+      is dcmd_show_selection -> canvas_body
+        .children ().eq (cmd.c.row).children ().eq (cmd.c.col)
+        .text ("X") ;
+      is dcmd_clear_selection -> canvas_body
+        .find ("td").text ("")
+      is dcmd_showadd_key_config -> configure_key_at (cmd.c)
+      is dcmd_showadd_door_config -> configure_door_at (cmd.c)
+      is dcmd_showadd_map_config -> configure_player_at (cmd.c)
       is dcmd_verify_editing -> send ( ds_editing_verified (
         current_existing.verify ()))
       is dcmd_show_map_invalid -> { }
@@ -1448,6 +1502,123 @@ class UiDesigner constructor (
       is dcmd_prepare_file -> { }
       is dcmd_offer_download -> { }
       is dcmd_add_to_menu -> { }
+    }
+  }
+
+  var config_writer : () -> Unit = { }
+
+  fun save_config () : Unit {
+    config_writer () ;
+    config_writer = { }
+  }
+
+  fun configure_key_at (c : coords) : Unit {
+    save_config () ;
+    configure_box.show () ;
+    configure_box.children ().remove () ;
+    val fuel_input = html_input ().value ("0") ;
+
+    span_label ("Fuel : ").append_to (configure_box) ;
+    fuel_input.append_to (configure_box) ;
+
+    val kf = current_existing.key_fuel_int[c] ;
+    kf ?. let {
+      fuel_input.value (kf.toString ()) ;
+    }
+
+    config_writer = {
+      current_existing.key_fuel_int[c] =
+        as_int (0, fuel_input.value ()) ;
+    }
+  }
+
+  fun configure_door_at (c : coords) : Unit {
+    save_config () ;
+    configure_box.show () ;
+    configure_box.children ().remove () ;
+    val keys_input = html_input () ;
+    val opened_input = html_input ("checkbox") ;
+
+    span_label ("Keys : ").append_to (configure_box) ;
+    keys_input.append_to (configure_box).value ("1") ;
+    br ().append_to (configure_box) ;
+
+    span_label ("Opened : ").append_to (configure_box) ;
+    opened_input.append_to (configure_box) ;
+    val door = current_existing.board[c.row][c.col] ;
+    when (door) {
+      is loc_door -> opened_input.checked (door.opened)
+      else -> { }
+    }
+
+    opened_input.on ("change", { _ ->
+      canvas_body.children ().eq (c.row).children ().eq (c.col)
+        .attr ("class", loc_to_decor_cls (loc_door (opened_input.checked ()))) ;
+    }) ;
+
+    val dk = current_existing.door_keys_int[c] ;
+    dk ?. let {
+      keys_input.value (dk.toString ()) ;
+    }
+
+    config_writer = {
+      current_existing.door_keys_int[c] =
+        as_int (1, keys_input.value ()) ;
+      val _door = current_existing.board[c.row][c.col] ;
+      when (_door) {
+        is loc_door -> {
+          current_existing.board[c.row][c.col] = loc_door (opened_input.checked ()) ;
+          canvas_body.children ().eq (c.row).children ().eq (c.col)
+            .attr ("class", loc_to_decor_cls (loc_door (opened_input.checked ()))) ;
+        }
+        else -> { }
+      }
+    }
+  } // configure_door
+
+  fun configure_player_at (c : coords) : Unit {
+    save_config () ;
+    configure_box.show () ;
+    configure_box.children ().remove () ;
+    val tick_interval_input = html_input () ;
+    val max_fuel_input = html_input () ;
+    val starting_fuel_input = html_input () ;
+    val tick_cost_input = html_input () ;
+    val move_cost_input = html_input () ;
+    val name_input = html_input () ;
+
+    fun add_with_label (l : String, w : jquery, v : String) {
+      span_label (l).append_to (configure_box) ;
+      w.append_to (configure_box).value (v) ;
+      br ().append_to (configure_box) ;
+    }
+
+    add_with_label ("Tick Interval (millis) : ", tick_interval_input, "1000") ;
+    add_with_label ("Max Fuel : ", max_fuel_input, "1000") ;
+    add_with_label ("Starting Fuel : ", starting_fuel_input, "750") ;
+    add_with_label ("Fuel cost per tick : ", tick_cost_input, "5") ;
+    add_with_label ("Fuel per move : ", move_cost_input, "10") ;
+    add_with_label ("Name : ", name_input, "Tobor, The Robot") ;
+
+    val svals = current_existing.player_config[c] ;
+    svals ?. let {
+      tick_interval_input.value (svals.tick_interval.toString ()) ;
+      max_fuel_input.value (svals.max_fuel.toString ()) ;
+      starting_fuel_input.value (svals.starting_fuel.toString ()) ;
+      tick_cost_input.value (svals.tick_cost.toString ()) ;
+      move_cost_input.value (svals.move_cost.toString ()) ;
+      name_input.value (svals.name.toString ()) ;
+    }
+
+    config_writer = {
+      current_existing.player_config[c] = player_config_tile (
+        tick_interval = as_double (1000.0, tick_interval_input.value ()) ,
+        max_fuel = as_int (1000, max_fuel_input.value ()) ,
+        starting_fuel = as_int (750, starting_fuel_input.value ()) ,
+        tick_cost = as_int (5, tick_cost_input.value ()) ,
+        move_cost = as_int (20, move_cost_input.value ()) ,
+        name = name_input.value ()
+      ) ;
     }
   }
 }
