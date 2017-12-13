@@ -405,7 +405,7 @@ Inductive designer_command :=
 | dcmd_showadd_map_config : coords -> designer_command
 | dcmd_verify_editing
 | dcmd_show_map_invalid
-| dcmd_show_done_screen
+| dcmd_show_done_screen : bool -> designer_command
 | dcmd_prepare_file
 | dcmd_offer_download
 | dcmd_add_to_menu
@@ -538,16 +538,25 @@ Inductive designer_process :
                      dstate_configuring dstate_edit_verifying
                      [ dcmd_verify_editing ]
 
+| dproc_verifying_editing_paint :
+    designer_process ds_done
+                     dstate_painting dstate_edit_verifying
+                     [ dcmd_verify_editing ]
+
 | dproc_verifying_failed :
     designer_process (ds_editing_verified false)
                      dstate_edit_verifying dstate_configuring
-                     [ dcmd_hide_config ]
+                     [ dcmd_hide_config ;
+                         dcmd_enable_brush_picker false ;
+                         dcmd_clear_selection ;
+                         dcmd_show_map_invalid
+                     ]
 
 | dproc_verifying_success :
     designer_process (ds_editing_verified true)
                      dstate_edit_verifying dstate_finalizing
                      [ dcmd_prepare_file ;
-                         dcmd_show_done_screen ]
+                         dcmd_show_done_screen true ]
 
 | dproc_downloading :
     designer_process ds_download
@@ -563,4 +572,12 @@ Inductive designer_process :
     designer_process ds_quit
                      s dstate_exiting
                      [ dcmd_back_to_menu ]
+
+| dproc_back_to_editing :
+    designer_process (ds_mode_picked dsm_configuring)
+                     dstate_finalizing dstate_configuring
+                     [ dcmd_show_done_screen false ;
+                         dcmd_hide_config ;
+                         dcmd_clear_selection ]
+    
 .

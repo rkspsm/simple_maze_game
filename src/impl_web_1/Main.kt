@@ -15,9 +15,39 @@ fun current_time () : Double { return js ("Date.now ()") ; }
 fun sched (ms : Double, fn : () -> Unit) = window.setTimeout (fn, ms.toInt ()) ;
 fun sched (ms : Int, fn : () -> Unit) = window.setTimeout (fn, ms) ;
 
-external interface file_interface {
+@JsName ("Array")
+external class js_array constructor (_data : Any?) { }
+
+@JsName ("Blob")
+external open class blob constructor (_data : js_array, _type : Json) {
   @JsName ("type")
   val mime_type : String ;
+
+}
+
+fun blob.is_json () : Boolean =
+  this.mime_type == "application/json" ;
+
+fun json_blob (stuff : Json) : blob = blob (
+  js_array (JSON.stringify (stuff)) ,
+  json (Pair ("type", "application/json"))) ;
+
+
+external interface url_interface {
+
+  @JsName ("createObjectURL")
+  fun create_object_url (d : blob) : String ;
+
+}
+
+@JsName ("URL")
+external val url : url_interface ;
+
+fun json_download_url (x : Json) : String =
+  url.create_object_url (json_blob (x)) ;
+
+@JsName ("File")
+external class file_interface : blob {
 
   val size : Double ;
 }
@@ -39,9 +69,6 @@ fun file_reader.read_text_file (f : file_interface, fn : (String) -> Unit) : Uni
   this.add_event_listener ("loadend", { fn (this.string_result) }) ;
   this.read_as_text (f) ;
 }
-
-fun file_interface.is_json () : Boolean =
-  this.mime_type == "application/json" ;
 
 external interface file_list {
   val length : Int ;
@@ -722,7 +749,9 @@ fun json_to_coord_hash (rows : Int, cols : Int, raw : Json ,
       handler (
         coords (ir, ic),
         raw[coord_key (ir, ic)]) ;
+      ic ++ ;
     }
+    ir ++ ;
   }
 }
 
@@ -746,6 +775,14 @@ fun json_to_player_config_tile (raw : Json) : player_config_tile {
   return player_config_tile (
     tick_interval, max_fuel, starting_fuel, tick_cost, move_cost, name) ;
 }
+
+fun player_config_tile_to_json (obj : player_config_tile) = json (
+  Pair (json_keys.tick_interval.str, obj.tick_interval) ,
+  Pair (json_keys.max_fuel.str, obj.max_fuel) ,
+  Pair (json_keys.starting_fuel.str, obj.starting_fuel) ,
+  Pair (json_keys.tick_cost.str, obj.tick_cost) ,
+  Pair (json_keys.move_cost.str, obj.move_cost) ,
+  Pair (json_keys.map_name.str, obj.name)) ;
 
 fun json_to_level (raw : Json) : level {
   val player_config = raw.uget<Json> (json_keys.player_config) ;
@@ -849,6 +886,34 @@ class existing_level constructor (val raw_data : String) {
       return false ;
     }
   }
+
+  fun prepare_json () : Json {
+    val board_json = map_to_json (board) ;
+    val key_fuel_int_json = json () ;
+    val door_keys_int_json = json () ;
+    val player_config_json = json () ;
+
+    for ((k,v) in key_fuel_int.entries) {
+      key_fuel_int_json[coord_key (k)] = v ;
+    }
+
+    for ((k,v) in door_keys_int.entries) {
+      door_keys_int_json[coord_key (k)] = v ;
+    }
+
+    for ((k,v) in player_config.entries) {
+      player_config_json[coord_key (k)] = v ;
+    }
+
+    return json (
+      Pair (json_keys.rows.str, rows) ,
+      Pair (json_keys.cols.str, cols) ,
+      Pair (json_keys.board.str, board_json) ,
+      Pair (json_keys.key_fuel.str, key_fuel_int_json) ,
+      Pair (json_keys.door_keys.str, door_keys_int_json) ,
+      Pair (json_keys.player_config.str, player_config_json)
+    ) ;
+  }
 }
 
 sealed class designer_stimulus ;
@@ -888,7 +953,7 @@ data class dcmd_showadd_door_config (val c : coords) : designer_command () ;
 data class dcmd_showadd_map_config (val c : coords) : designer_command () ;
 object dcmd_verify_editing : designer_command () ;
 object dcmd_show_map_invalid : designer_command () ;
-object dcmd_show_done_screen : designer_command () ;
+data class dcmd_show_done_screen (val bv : Boolean) : designer_command () ;
 object dcmd_prepare_file : designer_command () ;
 object dcmd_offer_download : designer_command () ;
 object dcmd_add_to_menu : designer_command () ;
@@ -1104,6 +1169,9 @@ class UiDesigner constructor (
   val editing_done = empty_button () ;
   val canvas = empty_div () ;
 
+  val level_download_a = jQuery ("<a></a>")
+    .attr ("target", "_blank") ;
+
   // uidg setup
   fun setup () {
     parent.append (root) ;
@@ -1196,6 +1264,24 @@ class UiDesigner constructor (
     ;
 
     canvas.on ("mouseup", { send (ds_canvas_mouse_up) }) ;
+
+    empty_button ()
+      .text ("Back to editing")
+      .on_click ({ _ -> send (ds_mode_picked (dsm_configuring)) })
+      .append_to (finalizer) ;
+
+    level_download_a
+      .text ("Download map")
+      .append_to (finalizer) ;
+
+    empty_button ()
+      .text ("Add map to menu")
+      .on_click ({ _ -> send (ds_add_to_menu) })
+      .append_to (finalizer) ;
+
+    quit_button ()
+      .text ("Back to menu")
+      .append_to (finalizer) ;
   }
 
   fun reset () {
@@ -1318,10 +1404,15 @@ class UiDesigner constructor (
       }
 
       is ds_mode_picked -> when (sim.m) {
-        // dproc_mode_to_configuring
         is dsm_configuring -> when (st) {
+          // dproc_mode_to_configuring
           is dstate_painting -> Pair (dstate_configuring , arrayOf (
             dcmd_enable_brush_picker (false) ,
+            dcmd_hide_config ,
+            dcmd_clear_selection ))
+          // dproc_back_to_editing
+          is dstate_finalizing -> Pair (dstate_configuring, arrayOf (
+            dcmd_show_done_screen (false) ,
             dcmd_hide_config ,
             dcmd_clear_selection ))
           else -> nothing
@@ -1336,9 +1427,12 @@ class UiDesigner constructor (
         }
       }
 
-      // dproc_verifying_editing
       is ds_done -> when (st) {
+        // dproc_verifying_editing
         is dstate_configuring -> Pair (dstate_edit_verifying ,
+          arrayOf<designer_command> ( dcmd_verify_editing ))
+        // dproc_verifying_editing_paint
+        is dstate_painting -> Pair (dstate_edit_verifying ,
           arrayOf<designer_command> ( dcmd_verify_editing ))
         else -> nothing
       }
@@ -1346,12 +1440,15 @@ class UiDesigner constructor (
       is ds_editing_verified -> when (st) {
         is dstate_edit_verifying -> when (sim.bv) {
           // dproc_verifying_failed
-          false -> Pair (dstate_configuring ,
-            arrayOf<designer_command> ( dcmd_hide_config ))
+          false -> Pair (dstate_configuring , arrayOf ( 
+            dcmd_hide_config ,
+            dcmd_enable_brush_picker (false) ,
+            dcmd_clear_selection ,
+            dcmd_show_map_invalid ))
           // dproc_verifying_success
           true -> dproc_resp_type (dstate_finalizing , arrayOf (
             dcmd_prepare_file ,
-            dcmd_show_done_screen ))
+            dcmd_show_done_screen (true)))
           }
         else -> nothing
       }
@@ -1409,6 +1506,7 @@ class UiDesigner constructor (
   var canvas_body = table_body () ;
 
   fun setup_editor () : Unit {
+    canvas.children ().remove () ;
     val table = table ()
       .add_class (cls_maze_table)
       .add_class ("design-phase")
@@ -1457,9 +1555,11 @@ class UiDesigner constructor (
           current_existing = cmd.lvl ;
           send (ds_existing_verified (true))
         }
-        false -> send (ds_existing_verified (false))
+        false -> {
+          send (ds_existing_verified (false)) ;
+        }
       }
-      is dcmd_load_dropped_file -> { 
+      is dcmd_load_dropped_file -> {
         setup_editor () ;
         show_editor () ;
       }
@@ -1495,11 +1595,18 @@ class UiDesigner constructor (
       is dcmd_showadd_key_config -> configure_key_at (cmd.c)
       is dcmd_showadd_door_config -> configure_door_at (cmd.c)
       is dcmd_showadd_map_config -> configure_player_at (cmd.c)
-      is dcmd_verify_editing -> send ( ds_editing_verified (
-        current_existing.verify ()))
-      is dcmd_show_map_invalid -> { }
-      is dcmd_show_done_screen -> show_finalizer ()
-      is dcmd_prepare_file -> { }
+      is dcmd_verify_editing -> {
+        save_config () ;
+        send ( ds_editing_verified (
+          loc_map_valid (current_existing.board))) ;
+      }
+      is dcmd_show_map_invalid -> ok_dialog ("map is invalid")
+      is dcmd_show_done_screen -> when (cmd.bv) {
+        true -> { save_config () ; show_finalizer () ; }
+        false -> show_editor ()
+      }
+      is dcmd_prepare_file -> level_download_a.attr ("href", json_download_url (
+          current_existing.prepare_json ())) ;
       is dcmd_offer_download -> { }
       is dcmd_add_to_menu -> { }
     }
@@ -1839,8 +1946,8 @@ class Executor {
   fun file_dropped (f : file_interface) : Unit {
     if (f.is_json () && f.size < 1000000) {
       val reader = file_reader () ;
-      reader.read_text_file (f, { _ ->
-        // FIXME: tell ui handlers about file
+      reader.read_text_file (f, { contents ->
+        m_ui_designer.file_dropped (contents)
       }) ;
     }
   }
