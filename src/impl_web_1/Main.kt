@@ -227,6 +227,8 @@ fun as_double (df : Double, x : String) : Double {
 fun ok_dialog (msg : String, _extra : jquery? = null) : Unit {
   val extra = _extra ?: empty_div () ;
 
+  jQuery (".main").hide () ;
+
   val dialog = empty_div ()
     .css ("position", "absolute")
     .css ("top", "0px")
@@ -241,7 +243,7 @@ fun ok_dialog (msg : String, _extra : jquery? = null) : Unit {
   dialog
     .append (empty_button ()
       .text ("Ok")
-      .on_click ({ _ -> dialog.remove () }))
+      .on_click ({ _ -> jQuery (".main").show () ; dialog.remove () }))
     .on ("dragover drop", { evt -> evt.stop_propagation () })
     .inner_width (jQuery (window).inner_width ())
     .inner_height (jQuery (window).inner_height ())
@@ -406,6 +408,7 @@ class process_move constructor
           mvcmd_update_coords (src, loc_empty),
           mvcmd_update_coords (_dest, loc_player),
           mvcmd_update_player_coords (_dest),
+          mvcmd_key_update_doors,
           mvcmd_add_fuel (_dest),
           mvcmd_append_to_replay (arrayOf (
             Pair (src, loc_empty), Pair (_dest, loc_player)))
@@ -914,6 +917,36 @@ class existing_level constructor (val raw_data : String) {
       Pair (json_keys.player_config.str, player_config_json)
     ) ;
   }
+
+  fun make_level () : level {
+    val src = board_find (board, loc_player) ;
+    val conf = player_config[src] ?: player_config_tile (
+      1000.0, 1000, 800, 5, 20, "Tobor, The Robot"
+    ) ;
+
+    val key_fuel = hashMapOf<coords, game_fuel> () ;
+    val door_keys = hashMapOf<coords, Int> () ;
+
+    for ((k,v) in key_fuel_int.entries) {
+      key_fuel.put (k, game_fuel (v)) ;
+    }
+
+    for ((k, v) in door_keys_int.entries) {
+      door_keys.put (k, v) ;
+    }
+    
+    return level (
+      board,
+      conf.tick_interval,
+      game_fuel (conf.max_fuel) ,
+      game_fuel (conf.starting_fuel) ,
+      key_fuel,
+      door_keys,
+      game_fuel (conf.tick_cost) ,
+      game_fuel (conf.move_cost) ,
+      conf.name
+    ) ;
+  }
 }
 
 sealed class designer_stimulus ;
@@ -1065,6 +1098,7 @@ class UiGame constructor (
 
   val game_area = empty_div () ;
   val fuel_area = empty_div () ;
+  val current_fuel = empty_div () ;
   val keys_found = empty_div () ;
   val doors_opened = empty_div () ;
 
@@ -1072,15 +1106,20 @@ class UiGame constructor (
     parent.append (root) ;
 
     root
-      .append (game_area.add_class (cls_game))
+      .append (fuel_area.add_class (cls_fuel).append (current_fuel))
+      .append (game_area)
       .append (br ()).append (hr ()).append (br ())
-      .append (fuel_area.add_class (cls_fuel))
       .append (keys_found.add_class (cls_keys))
       .append (doors_opened.add_class (cls_doors))
     ;
+
+    empty_button ().append_to (root)
+      .text ("Quit")
+      .on_click ({ _ -> send (stls_game_quit) })
+    ;
   }
 
-  var board : loc_map? = null ;
+  var board : loc_map = mutableListOf () ;
   var cells : HashMap<coords, jquery> = hashMapOf () ;
   var src : coords = coords (0, 0) ;
 
@@ -1094,7 +1133,8 @@ class UiGame constructor (
       board = copy_loc_map (_board) ;
       src = board_find (_board, loc_player) ;
       cells = hashMapOf () ;
-      val t = table ().append_to (game_area).append (table_head ()) ;
+      val t = table ().add_class (cls_game)
+        .append_to (game_area).append (table_head ()) ;
       val tb = table_body ().append_to (t) ;
       for ((row, lr) in _board.withIndex ()) {
         val r = table_row ().append_to (tb) ;
@@ -1109,19 +1149,18 @@ class UiGame constructor (
   }
 
   fun set_fuel (curf : Int, mf : Int) {
-    fuel_area.text ("Fuel : $curf / $mf") ;
+    val pct = curf.toDouble () * 100.0 / mf.toDouble () ;
+    current_fuel.css ("width", "${pct}%") ;
+    //fuel_area.text ("Fuel : $curf / $mf") ;
   }
 
   fun update_coords (c : coords, l : location) {
-    val _board = board ;
-    _board ?. let {
-      val lr = _board[c.row] ;
-      lr[c.col] = l ;
-      val cell = cells[c] ;
-      cell ?. let {
-        //cell.text (loc_to_decor (l)) ;
-        cell.attr ("class", loc_to_decor_cls (l)) ;
-      }
+    val lr = board[c.row] ;
+    lr[c.col] = l ;
+    val cell = cells[c] ;
+    cell ?. let {
+      //cell.text (loc_to_decor (l)) ;
+      cell.attr ("class", loc_to_decor_cls (l)) ;
     }
   }
 }
@@ -1130,7 +1169,8 @@ typealias dproc_resp_type = Pair<designer_state, Array<designer_command>> ;
 
 class UiDesigner constructor (
   @JsName ("container") val parent : jquery ,
-  val send_to_menu : (stimulus) -> Unit
+  val send_to_menu : (stimulus) -> Unit ,
+  val add_to_menu : (level) -> Unit
   )
 {
 
@@ -1219,7 +1259,7 @@ class UiDesigner constructor (
     br ().append_to (size_picker) ;
     quit_button ().append_to (size_picker) ;
 
-    span_label ("Brushes: ").append_to (editor) ;
+    span_label ("Brushes: ").append_to (brush_box) ;
     brush_box.append_to (editor) ;
     empty_button ()
       .text ("Empty")
@@ -1251,11 +1291,11 @@ class UiDesigner constructor (
 
     configure_box.append_to (editor) ;
     quit_button ().append_to (editor) ;
-    to_painting.text ("Paint")
+    to_painting.text ("Go to Paint Mode")
       .append_to (editor)
       .on_click ({ _ -> send (ds_mode_picked (dsm_painting)) })
     ;
-    to_config.text ("Configure")
+    to_config.text ("Go to Configuration Mode")
       .append_to (editor)
       .on_click ({ _ -> send (ds_mode_picked (dsm_configuring)) })
     ;
@@ -1413,6 +1453,7 @@ class UiDesigner constructor (
           // dproc_back_to_editing
           is dstate_finalizing -> Pair (dstate_configuring, arrayOf (
             dcmd_show_done_screen (false) ,
+            dcmd_enable_brush_picker (false) ,
             dcmd_hide_config ,
             dcmd_clear_selection ))
           else -> nothing
@@ -1608,7 +1649,7 @@ class UiDesigner constructor (
       is dcmd_prepare_file -> level_download_a.attr ("href", json_download_url (
           current_existing.prepare_json ())) ;
       is dcmd_offer_download -> { }
-      is dcmd_add_to_menu -> { }
+      is dcmd_add_to_menu -> add_to_menu (current_existing.make_level ())
     }
   }
 
@@ -1763,26 +1804,17 @@ class Executor {
   }
 
   var builtin_levels = arrayOf<level> () ;
-  var selected_level : level? = null ;
+  var selected_level : level = demo_level ;
   var current_fuel = game_fuel (0) ;
+  var current_keys = 0 ;
 
-  fun current_tick_cost () : Int {
-    val tk = selected_level ?. tick_cost ;
-    return tk ?. remaining ?: 0 ;
-  }
-
-  fun current_move_cost () : Int {
-    val tk = selected_level ?. move_cost ;
-    return tk ?. remaining ?: 1 ;
-  }
-
-  fun current_max_fuel () : Int {
-    val tk = selected_level ?. max_fuel ;
-    return tk ?. remaining ?: 10 ;
-  }
+  fun current_tick_cost () : Int = selected_level.tick_cost.remaining ;
+  fun current_move_cost () : Int = selected_level.move_cost.remaining ;
+  fun current_max_fuel () : Int  = selected_level.max_fuel.remaining ;
 
   var m_process_move : process_move? = null ;
 
+  // execcmd
   fun run_command (cmd : command) : Unit {
     when (cmd) {
 
@@ -1815,30 +1847,89 @@ class Executor {
           }
         }
       }
+
+      is cmd_postgame_reset_map -> m_ui_game.reset ()
+      is cmd_postgame_set_theme -> setpgm_msg (cmd.is_vict)
+      is cmd_postgame_prepare_replay -> { }
+      is cmd_postgame_offer_replay_download -> { }
+
       is cmd_transfer_to_designer -> m_ui_designer.run ()
       else -> { }
     }
   }
 
+  fun iterboard (fn : (coords, location, (location) -> Unit) -> Unit) {
+    var board = m_ui_game.board ;
+    val rows = board.size ;
+    val cols = board[0].size ;
+    var ir = 0 ;
+    while (ir < rows) {
+      val row = board[ir] ;
+      var ic = 0 ;
+      while (ic < cols) {
+        val l = row[ic] ;
+        fn (coords (ir, ic), l, { xl -> row[ic] = xl }) ;
+        ic ++ ;
+      }
+      ir ++ ;
+    }
+  }
+
+  // execmvcmd
   fun run_move_command (cmd : move_command) : Unit {
     when (cmd) {
       is mvcmd_update_coords -> m_ui_game.update_coords (cmd.c, cmd.l)
-      is mvcmd_key_update_doors -> { }
-      is mvcmd_trigger_victory -> { }
+      is mvcmd_key_update_doors -> {
+        current_keys += 1 ;
+        iterboard ({ c, l, setter ->
+          when (l) {
+            is loc_door -> when (l.opened) {
+              false -> when (current_keys >= selected_level.door_keys (c)) {
+                true -> {
+                  setter (loc_door (true)) ;
+                  m_ui_game.update_coords (c, loc_door (true)) ;
+                }
+                false -> { }
+              }
+              true -> { }
+            }
+            else -> { }
+          }
+        }) ;
+      }
+      is mvcmd_trigger_victory -> send (stls_game_victory)
       is mvcmd_expend_fuel -> { 
         current_fuel.remaining -= current_move_cost () ;
-        m_ui_game.set_fuel (current_fuel.remaining, current_max_fuel ()) ;
+        if (current_fuel.remaining > selected_level.max_fuel.remaining) {
+          current_fuel.remaining = selected_level.max_fuel.remaining ;
+        }
         if (current_fuel.remaining <= 0) {
           send (stls_game_fuel_empty) ;
         }
+        m_ui_game.set_fuel (current_fuel.remaining, current_max_fuel ()) ;
       }
       is mvcmd_update_player_coords -> {
         m_ui_game.src.row = cmd.c.row ;
         m_ui_game.src.col = cmd.c.col ;
       }
       is mvcmd_append_to_replay -> { }
-      is mvcmd_add_fuel -> { cmd.c }
+      is mvcmd_add_fuel -> {
+        val topup = selected_level.key_fuel (cmd.c).remaining ;
+        current_fuel.remaining += topup ;
+        if (current_fuel.remaining > selected_level.max_fuel.remaining) {
+          current_fuel.remaining = selected_level.max_fuel.remaining ;
+        }
+        if (current_fuel.remaining <= 0) {
+          send (stls_game_fuel_empty) ;
+        }
+        m_ui_game.set_fuel (current_fuel.remaining, current_max_fuel ()) ;
+      }
     }
+  }
+
+  fun add_to_menu (l : level) : Unit {
+    builtin_levels = builtin_levels + l ;
+    m_ui_menu.populate_levels (builtin_levels) ;
   }
 
   val cls_main = ".main" ;
@@ -1848,15 +1939,36 @@ class Executor {
   val m_ui_game = UiGame (m_main, { s -> send (s) }, { selected_level }) ;
   val m_ui_postgame = empty_div () ;
   val m_ui_menu = UiMenu (m_main, { s -> send (s) })
-  val m_ui_designer = UiDesigner (m_main, { s -> send (s) })
+  val m_ui_designer = UiDesigner (m_main, { s -> send (s) }, { l -> add_to_menu (l) })
   val m_ui_replay = empty_div () ;
+
+  val pgm_message = empty_div () ;
+
+  fun setpgm_msg (did_we_win : Boolean) : Unit = when (did_we_win) {
+    true -> pgm_message.text ("Victory !")._discard ()
+    false -> pgm_message.text ("Game Over :(")._discard ()
+  }
 
   fun setup_ui () : Unit {
     m_ui_menu.setup () ;
     m_ui_game.setup () ;
     m_ui_designer.setup () ;
+    m_main.append (m_ui_postgame) ;
     m_main.children ().hide () ;
     jQuery (document).on_keydown ({ evt -> key_released (evt.which) }) ;
+
+    pgm_message.append_to (m_ui_postgame) ;
+    empty_button ()
+      .text ("Play Again")
+      .append_to (m_ui_postgame)
+      .on_click ({ _ -> send (stls_postgame_play_again) })
+    ;
+
+    empty_button ()
+      .text ("Back to Menu")
+      .append_to (m_ui_postgame)
+      .on_click ({ _ -> send (stls_postgame_goto_menu) })
+    ;
   }
 
   fun key_released (code : Int) {
@@ -1882,22 +1994,21 @@ class Executor {
   }
 
   fun prepare_and_show_game_ui () : Unit {
-    current_fuel.remaining = selected_level?.starting_fuel?.remaining ?: 0 ;
+    current_fuel.remaining = selected_level.starting_fuel.remaining ;
+    current_keys = 0 ;
     m_ui_game.reset () ;
     val board = m_ui_game.board ;
-    board ?. let {
-      val mrow = board.size
-      val col = board.getOrNull (0) ;
-      col ?. let {
-        m_process_move = process_move (
-          mrow - 1, col.size - 1, board, m_ui_game.src) ;
-      }
+    val mrow = board.size
+    val col = board.getOrNull (0) ;
+    col ?. let {
+      m_process_move = process_move (
+        mrow - 1, col.size - 1, board, m_ui_game.src) ;
     }
     m_ui_game.show () ;
   }
 
   fun current_tick_interval () : game_time
-    = selected_level ?. tick_interval ?: 1000.0 ;
+    = selected_level.tick_interval ;
 
   var t_last_time : game_time = 0.0 ;
   fun tick () {

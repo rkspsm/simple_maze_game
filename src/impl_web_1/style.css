@@ -11,6 +11,19 @@ button {
   font-weight : bold ;
 }
 
+.game-fuel {
+  height : 1rem ;
+  background-color : red ;
+  display : inline-block ;
+  width : 10rem ;
+}
+
+.game-fuel div {
+  height : 1rem ;
+  background-color : blue ;
+  display : inline-block ;
+}
+
 .maze-table {
   font-family : monospace ;
   cursor : crosshair ;

@@ -577,6 +577,7 @@ Inductive designer_process :
     designer_process (ds_mode_picked dsm_configuring)
                      dstate_finalizing dstate_configuring
                      [ dcmd_show_done_screen false ;
+                         dcmd_enable_brush_picker false ;
                          dcmd_hide_config ;
                          dcmd_clear_selection ]
     
