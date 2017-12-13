@@ -484,7 +484,6 @@ object stls_menu_levels_fetched : stimulus () ;
 data class stls_menu_level_selected (val li : level_index) : stimulus () ;
 object stls_menu_designer : stimulus () ;
 object stls_menu_replay : stimulus () ;
-object stls_menu_game_info : stimulus () ;
 object stls_back_from_designer : stimulus () ;
 
 data class stls_game_moved (val m : movement) : stimulus () ;
@@ -1036,26 +1035,24 @@ class UiMenu constructor (
   fun hide () : Unit = root.hide ()._discard () ;
   fun show () : Unit = root.show ()._discard () ;
 
-  val info_link = ahref () ;
 
   val levels = empty_div () ;
   val designer = empty_div () ;
 
   fun setup () {
+
+    val info_box = empty_div () ;
+
     parent.append (root) ;
     root
       .append ( empty_div ()
         .add_class (cls_title)
         .text ("Main Menu"))
-      .append ( info_link
-        .add_class (cls_info)
-        .text ("Game Info"))
+      .append ( info_box)
       .append ( br())
       .append ( levels
         .add_class (cls_levels))
     ;
-
-    info_link.on_click ({ send (stls_menu_game_info) ; })
 
     designer.append_to (root) ;
 
@@ -1063,6 +1060,54 @@ class UiMenu constructor (
       .text ("Level Designer")
       .append_to (designer)
       .on_click ({ send (stls_menu_designer) })
+
+    val helpul = unordered_list ().append_to (info_box) ;
+
+    list_item ()
+      .append (span_label (" ").add_class ("help loc_player"))
+      .append (span_label (" is the player you are controlling."))
+      .append_to (helpul)
+    ;
+
+    list_item ()
+      .append (span_label (" ").add_class ("help loc_wall"))
+      .append (span_label (" are walls you cant pass through."))
+      .append_to (helpul)
+    ;
+
+    list_item ()
+      .append (span_label (" ").add_class ("help loc_door_open"))
+      .append (span_label (" are exits you need to reach before fuel runs out."))
+      .append_to (helpul)
+    ;
+
+    list_item ()
+      .append (span_label (" ").add_class ("help loc_door_closed"))
+      .append (span_label (" are doors to exits which are closed."))
+      .append_to (helpul)
+    ;
+
+    list_item ()
+      .append (span_label (" ").add_class ("help loc_key"))
+      .append (span_label (" are keys which give you fuel and they open doors."))
+      .append_to (helpul)
+    ;
+
+    list_item ()
+      .append (span_label ("Each door has its own number of keys requirement."))
+      .append_to (helpul)
+    ;
+
+    list_item ()
+      .append (span_label ("Picking that many keys will open that door."))
+      .append_to (helpul)
+    ;
+
+    list_item ()
+      .append (span_label ("Fuel is displayed at top, and it depletes with time, faster if you move."))
+      .append_to (helpul)
+    ;
+
   }
 
   fun populate_levels (ls: Array<level>) {
@@ -1823,7 +1868,7 @@ class Executor {
       is cmd_select_ui -> select_ui (cmd.ui)
 
       is cmd_menu_fetch_builtin_levels -> if (loc_map_valid (demo_level.board)) {
-        builtin_levels = arrayOf (demo_level) ;
+        builtin_levels = arrayOf (demo_level, osg_level) ;
         send (stls_menu_levels_fetched) ;
       }
       is cmd_menu_populate -> m_ui_menu.populate_levels (builtin_levels)
@@ -1875,27 +1920,31 @@ class Executor {
     }
   }
 
+  fun update_doors () {
+    iterboard ({ c, l, setter ->
+      when (l) {
+        is loc_door -> when (l.opened) {
+          false -> when (current_keys >= selected_level.door_keys (c)) {
+            true -> {
+              setter (loc_door (true)) ;
+              m_ui_game.update_coords (c, loc_door (true)) ;
+            }
+            false -> { }
+          }
+          true -> { }
+        }
+        else -> { }
+      }
+    }) ;
+  }
+
   // execmvcmd
   fun run_move_command (cmd : move_command) : Unit {
     when (cmd) {
       is mvcmd_update_coords -> m_ui_game.update_coords (cmd.c, cmd.l)
       is mvcmd_key_update_doors -> {
         current_keys += 1 ;
-        iterboard ({ c, l, setter ->
-          when (l) {
-            is loc_door -> when (l.opened) {
-              false -> when (current_keys >= selected_level.door_keys (c)) {
-                true -> {
-                  setter (loc_door (true)) ;
-                  m_ui_game.update_coords (c, loc_door (true)) ;
-                }
-                false -> { }
-              }
-              true -> { }
-            }
-            else -> { }
-          }
-        }) ;
+        update_doors () ;
       }
       is mvcmd_trigger_victory -> send (stls_game_victory)
       is mvcmd_expend_fuel -> { 
@@ -2005,6 +2054,7 @@ class Executor {
         mrow - 1, col.size - 1, board, m_ui_game.src) ;
     }
     m_ui_game.show () ;
+    update_doors () ;
   }
 
   fun current_tick_interval () : game_time
@@ -2065,8 +2115,14 @@ class Executor {
 }
 
 var executor : Executor? = null ;
+external val osg_data : String ;
+var osg_level = demo_level ;
 
 fun main (s : Array<String>) {
+  val elosg = existing_level (osg_data) ;
+  elosg.verify () ;
+  elosg.prepare_json () ;
+  osg_level = elosg.make_level () ;
   jQuery (window).on_load ( {
     executor = Executor () ;
     executor?.run () ;

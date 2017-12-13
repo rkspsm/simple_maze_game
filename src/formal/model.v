@@ -173,7 +173,6 @@ Inductive stimulus :=
 | stls_menu_level_selected : level_index -> stimulus
 | stls_menu_designer
 | stls_menu_replay
-| stls_menu_game_info
 | stls_back_from_designer
     
 | stls_game_moved : movement -> stimulus

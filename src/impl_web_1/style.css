@@ -42,33 +42,38 @@ button {
 }
 
 .maze-table.design-phase td.location {
-  width : 50px ;
-  height : 50px ;
+  width : 20px ;
+  height : 20px ;
 }
 
-.maze-table td.location.loc_empty {
+.maze-table td.location.loc_empty, .help.loc_empty {
   background-color : #91ba68 ;
 }
 
-.maze-table td.location.loc_player {
+.maze-table td.location.loc_player, .help.loc_player {
   background-color : #6700a3 ;
   color : white ;
 }
 
-.maze-table td.location.loc_wall {
+.maze-table td.location.loc_wall, .help.loc_wall {
   background-color : black ;
 }
 
-.maze-table td.location.loc_key {
+.maze-table td.location.loc_key, .help.loc_key {
   background-color : green ;
 }
 
-.maze-table td.location.loc_door_open {
+.maze-table td.location.loc_door_open, .help.loc_door_open {
   background-color : white ;
 }
 
-.maze-table td.location.loc_door_closed {
+.maze-table td.location.loc_door_closed, .help.loc_door_closed {
   background-color : #710000 ;
   color : white ;
+}
+
+.help {
+  font-family : monospace ;
+  white-space : pre ;
 }
 
